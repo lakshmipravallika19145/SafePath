@@ -1145,7 +1145,24 @@ def create_app():
                 }
             )
 
-        # "Balanced" and "Fastest" are presentation labels. Safest is highest score.
+        # Determine route categories: safest, fastest, balanced
+        safest_route = max(routes_out, key=lambda x: x["route_score"]) if routes_out else None
+        fastest_route = min(routes_out, key=lambda x: x["duration_s"]) if routes_out else None
+
+        balanced_route = None
+        if routes_out:
+            min_d = min(route["duration_s"] for route in routes_out)
+            max_d = max(route["duration_s"] for route in routes_out)
+            # Combine safety and speed into balanced score
+            best_balance = -1.0
+            for r in routes_out:
+                speed_score = 1.0 if max_d <= min_d else 1.0 - (r["duration_s"] - min_d) / (max_d - min_d)
+                bou = float(r.get("route_score", 0.0)) / 100.0
+                balance_score = (speed_score + bou) / 2.0
+                if balance_score > best_balance:
+                    best_balance = balance_score
+                    balanced_route = r
+
         ranked = sorted(routes_out, key=lambda x: x["route_score"], reverse=True)
         ai_best = ranked[0] if ranked else None
 
@@ -1162,6 +1179,9 @@ def create_app():
         return jsonify(
             {
                 "routes": routes_out,
+                "safest_route": safest_route,
+                "fastest_route": fastest_route,
+                "balanced_route": balanced_route,
                 "ai_recommendation": ai_best,
                 "ai_message": ai_message,
             }
