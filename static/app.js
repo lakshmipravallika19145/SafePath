@@ -48,6 +48,22 @@
     return "#ff4d6d";
   }
 
+  /** Route type accent colors */
+  function routeColor(key) {
+    if (key === "Safest Route")   return "#20e37f";
+    if (key === "Balanced Route") return "#e3b62f";
+    if (key === "Fastest Route")  return "#e33456";
+    return "#20e37f";
+  }
+
+  /** Route type icons */
+  function routeIcon(key) {
+    if (key === "Safest Route")   return "🛡️";
+    if (key === "Balanced Route") return "⚖️";
+    if (key === "Fastest Route")  return "⚡";
+    return "📍";
+  }
+
   /** Simple debounce utility */
   function debounce(fn, waitMs) {
     let t = null;
@@ -138,14 +154,12 @@
   function nearestIndex(coordsLatLng, lat, lng) {
     let bestI = 0;
     let bestD = Infinity;
-    // small downsample for speed
     const step = coordsLatLng.length > 1200 ? 6 : coordsLatLng.length > 600 ? 4 : coordsLatLng.length > 250 ? 2 : 1;
     for (let i = 0; i < coordsLatLng.length; i += step) {
       const c = coordsLatLng[i];
       const d = haversineM(c[0], c[1], lat, lng);
       if (d < bestD) { bestD = d; bestI = i; }
     }
-    // refine locally around bestI
     const start = Math.max(0, bestI - step * 2);
     const end = Math.min(coordsLatLng.length - 1, bestI + step * 2);
     for (let i = start; i <= end; i++) {
@@ -164,7 +178,7 @@
     container: "map",
     style: {
       version: 8,
-      glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf", 
+      glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
       sources: {
         osm: {
           type: "raster",
@@ -187,7 +201,6 @@
 
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
 
-  // Ensure panning (move map up/down/left/right) is enabled alongside zooming
   if (map.dragPan && typeof map.dragPan.enable === "function") map.dragPan.enable();
   if (map.keyboard && typeof map.keyboard.enable === "function") map.keyboard.enable();
 
@@ -203,15 +216,14 @@
   let routeSourceIds = [];
   let routeLayerIds = [];
   let arrowsLayerId = "route-arrows";
-function checkUserProfile(){
 
-let user = localStorage.getItem("safe_user")
+  function checkUserProfile() {
+    let user = localStorage.getItem("safe_user");
+    if (!user) {
+      document.getElementById("profileModal").style.display = "flex";
+    }
+  }
 
-if(!user){
-document.getElementById("profileModal").style.display = "flex"
-}
-
-}
   function clearRoutes() {
     routeLayerIds.forEach((id) => {
       if (map.getLayer(id)) map.removeLayer(id);
@@ -301,10 +313,6 @@ document.getElementById("profileModal").style.display = "flex"
   // Safety dataset visualization
   // ---------------------------
 
-  /**
-   * Compute a 0..100 safety percentage using the required formula.
-   * Dataset metrics are expected in the 1..10 range (incident_reports 0..10).
-   */
   function safetyPercentForPoint(p) {
     const crime = Number(p.crime_rate ?? 5);
     const lighting = Number(p.street_lighting ?? 5);
@@ -315,7 +323,6 @@ document.getElementById("profileModal").style.display = "flex"
     const traffic = Number(p.traffic_density ?? 5);
     const incidents = Number(p.incident_reports ?? 3);
 
-    // raw score is approximately in [-1.2, 7.85] given the required weights/ranges
     const raw =
       0.25 * lighting +
       0.15 * crowd +
@@ -332,12 +339,6 @@ document.getElementById("profileModal").style.display = "flex"
     return Math.round(Math.max(0, Math.min(100, pct)));
   }
 
-  /**
-   * Classify safety percentage into marker colors.
-   * - >= 70: green (safe)
-   * - 40..69: yellow (moderate)
-   * - < 40: red (unsafe)
-   */
   function safetyBand(pct) {
     if (pct >= 70) return { band: "safe", color: "#29ff9a" };
     if (pct >= 40) return { band: "moderate", color: "#ffd35a" };
@@ -498,10 +499,8 @@ document.getElementById("profileModal").style.display = "flex"
       return;
     }
 
-    // Continuously update location as the user moves (Google Maps-like)
     const options = { enableHighAccuracy: true, timeout: 12000, maximumAge: 1000 };
 
-    // Clean up prior watch
     if (state.watchId !== null) {
       try { navigator.geolocation.clearWatch(state.watchId); } catch (_) {}
       state.watchId = null;
@@ -524,14 +523,12 @@ document.getElementById("profileModal").style.display = "flex"
           .setLngLat([lng, lat])
           .addTo(map);
 
-        // If start not explicitly chosen, keep start pinned to live location.
         if (!state.start || state.start.label === "Current Location") {
           state.start = { lat, lng, label: "Current Location" };
           ui.inputStart.value = "Current Location";
           setStartMarker([lat, lng], "Start: Current Location");
         }
 
-        // Live navigation updates (remaining, next turn, reroute)
         if (state.navigating && state.nav.active) {
           updateNavigation(lat, lng);
         }
@@ -550,10 +547,6 @@ document.getElementById("profileModal").style.display = "flex"
   let startAbort = null;
   let endAbort = null;
 
-  /**
-   * Fetch suggestions from Flask proxy.
-   * Uses AbortController to cancel stale requests (performance).
-   */
   async function fetchSuggestions(q, abortController) {
     let url = "/api/autocomplete?q=" + encodeURIComponent(q);
     if (state.start && typeof state.start.lat === "number" && typeof state.start.lng === "number") {
@@ -564,12 +557,6 @@ document.getElementById("profileModal").style.display = "flex"
     return data;
   }
 
-  /**
-   * Render suggestions dropdown.
-   * @param {HTMLElement} container
-   * @param {{results:Array<any>, message?:string|null}} payload
-   * @param {(item:any)=>void} onPick
-   */
   function renderSuggestions(container, payload, onPick) {
     container.innerHTML = "";
     const results = (payload && payload.results) ? payload.results : [];
@@ -589,7 +576,6 @@ document.getElementById("profileModal").style.display = "flex"
       const row = document.createElement("button");
       row.type = "button";
       row.className = "suggest__item";
-      // Show name + address (Google Maps-like)
       const name = item.name || (item.display_name ? item.display_name.split(",")[0] : "Place");
       const addr = item.display_name || "";
       row.innerHTML =
@@ -604,14 +590,9 @@ document.getElementById("profileModal").style.display = "flex"
 
   const debouncedStartSuggest = debounce(async () => {
     const q = ui.inputStart.value.trim();
-    if (q.length < 2) {
-      renderSuggestions(ui.sugStart, { results: [] }, () => {});
-      return;
-    }
-
+    if (q.length < 2) { renderSuggestions(ui.sugStart, { results: [] }, () => {}); return; }
     if (startAbort) startAbort.abort();
     startAbort = new AbortController();
-
     try {
       const payload = await fetchSuggestions(q, startAbort);
       renderSuggestions(ui.sugStart, payload, (item) => {
@@ -622,21 +603,14 @@ document.getElementById("profileModal").style.display = "flex"
         map.flyTo({ center: [item.lng, item.lat], zoom: Math.max(14, map.getZoom()) });
         fitToStartEnd();
       });
-    } catch (e) {
-      // Abort is expected; ignore
-    }
+    } catch (e) {}
   }, 300);
 
   const debouncedEndSuggest = debounce(async () => {
     const q = ui.inputEnd.value.trim();
-    if (q.length < 2) {
-      renderSuggestions(ui.sugEnd, { results: [] }, () => {});
-      return;
-    }
-
+    if (q.length < 2) { renderSuggestions(ui.sugEnd, { results: [] }, () => {}); return; }
     if (endAbort) endAbort.abort();
     endAbort = new AbortController();
-
     try {
       const payload = await fetchSuggestions(q, endAbort);
       renderSuggestions(ui.sugEnd, payload, (item) => {
@@ -647,12 +621,9 @@ document.getElementById("profileModal").style.display = "flex"
         map.flyTo({ center: [item.lng, item.lat], zoom: Math.max(14, map.getZoom()) });
         fitToStartEnd();
       });
-    } catch (e) {
-      // Abort is expected; ignore
-    }
+    } catch (e) {}
   }, 300);
 
-  // Close dropdown when clicking outside
   document.addEventListener("click", (e) => {
     const t = e.target;
     if (!t.closest || (!t.closest("#start-wrap") && !t.closest("#dest-wrap"))) {
@@ -664,7 +635,6 @@ document.getElementById("profileModal").style.display = "flex"
   ui.inputStart.addEventListener("input", debouncedStartSuggest);
   ui.inputEnd.addEventListener("input", debouncedEndSuggest);
 
-  // Requirement: if user changes input after selecting, remove old marker + stored coordinates.
   ui.inputStart.addEventListener("input", () => {
     if (state.start && ui.inputStart.value.trim() !== (state.start.label || "").trim()) {
       state.start = null;
@@ -682,45 +652,53 @@ document.getElementById("profileModal").style.display = "flex"
   // Weights / filters (frontend)
   // ---------------------------
 
-  /** Build weights object to send to backend scoring (uses your required formula as base). */
   function buildWeights() {
     const on = (id) => $(id).checked;
-    const w = {
-      street_lighting: on("t-light") ? 0.25 : 0.05,
-      crowd_density: on("t-crowd") ? 0.15 : 0.05,
+    return {
+      street_lighting:  on("t-light")  ? 0.25 : 0.05,
+      crowd_density:    on("t-crowd")  ? 0.15 : 0.05,
       police_proximity: on("t-police") ? 0.10 : 0.03,
-      cctv_coverage: on("t-cctv") ? 0.10 : 0.03,
-      road_visibility: 0.10,
-      traffic_density: 0.10,
-      crime_rate: on("t-crime") ? 0.15 : 0.08,
+      cctv_coverage:    on("t-cctv")   ? 0.10 : 0.03,
+      road_visibility:  0.10,
+      traffic_density:  0.10,
+      crime_rate:       on("t-crime")  ? 0.15 : 0.08,
       incident_reports: 0.05,
     };
-    return w;
   }
 
   // ---------------------------
   // Routing (backend /api/routes)
   // ---------------------------
 
-  /** Build labeled routes array from raw routes (for 1, 2, or 3 routes). */
+  /**
+   * Build labeled routes from backend response.
+   * Backend now returns route_label on each route, so we prefer that.
+   * Falls back to legacy sort-based logic for backwards compat.
+   */
   function buildLabeledRoutes(routes) {
     if (!routes || !routes.length) return [];
-    const safest = [...routes].sort((a, b) => b.route_score - a.route_score)[0];
+
+    // New backend: route_label is already set
+    if (routes[0] && routes[0].route_label) {
+      return routes.map((r) => ({ key: r.route_label, route: r }));
+    }
+
+    // Legacy fallback
+    const safest  = [...routes].sort((a, b) => b.route_score - a.route_score)[0];
     const fastest = [...routes].sort((a, b) => a.duration_s - b.duration_s)[0];
     if (routes.length === 1) return [{ key: "Route", route: routes[0] }];
-    if (routes.length === 2) return [{ key: "Safest Route", route: safest }, { key: "Fastest Route", route: fastest }];
+    if (routes.length === 2) return [
+      { key: "Safest Route",  route: safest  },
+      { key: "Fastest Route", route: fastest },
+    ];
     const balanced = routes.find((r) => r !== safest && r !== fastest) || routes[1];
     return [
-      { key: "Safest Route", route: safest },
+      { key: "Safest Route",   route: safest   },
       { key: "Balanced Route", route: balanced },
-      { key: "Fastest Route", route: fastest },
+      { key: "Fastest Route",  route: fastest  },
     ];
   }
 
-  /**
-   * Geocode address string to coordinates via backend.
-   * Used when user types an address and clicks Find without selecting from dropdown.
-   */
   async function geocodeAddress(query) {
     const res = await fetch("/api/geocode?q=" + encodeURIComponent(query));
     if (!res.ok) return null;
@@ -729,9 +707,9 @@ document.getElementById("profileModal").style.display = "flex"
   }
 
   async function fetchRoutesAndScores() {
-    // If user typed address but didn't select from dropdown, try geocoding first
     const startInput = ui.inputStart.value.trim();
-    const endInput = ui.inputEnd.value.trim();
+    const endInput   = ui.inputEnd.value.trim();
+
     if (!state.start && startInput.length >= 2) {
       const geo = await geocodeAddress(startInput);
       if (geo) {
@@ -756,14 +734,14 @@ document.getElementById("profileModal").style.display = "flex"
     clearRoutes();
 
     const payload = {
-      start: { lat: state.start.lat, lng: state.start.lng },
-      end: { lat: state.end.lat, lng: state.end.lng },
-      weights: buildWeights(),
+      start:          { lat: state.start.lat, lng: state.start.lng },
+      end:            { lat: state.end.lat,   lng: state.end.lng   },
+      weights:        buildWeights(),
       max_distance_m: 280,
     };
 
     let res;
-    try{
+    try {
       res = await fetch("/api/routes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -797,62 +775,142 @@ document.getElementById("profileModal").style.display = "flex"
     focusRoute(labeled[0]);
 
     fitToStartEnd();
-    setStatus("Routes ready. Showing " + data.routes.length + " real road-following route(s).");
+    setStatus(
+      "✅ " + labeled.length + " routes found — " +
+      labeled.map(l => l.key + " (" + Math.round(l.route.route_score) + "%)").join(" · ")
+    );
   }
 
-  // ---------------------------
-  // UI rendering (cards + incidents + bottom nav)
-  // ---------------------------
+  // -----------------------------------------------
+  // UI rendering — Route Cards with full metrics
+  // -----------------------------------------------
 
+  /**
+   * Render the 3 route cards with complete metrics breakdown.
+   * Each card shows:
+   *  - Route label + icon + zone badge
+   *  - Safety score bar
+   *  - Distance · ETA · Safety %
+   *  - Per-mode travel times (Car / Bike / Walk / Truck)
+   *  - Nearby safety point count
+   */
   function renderRouteCards(labeled) {
     ui.cards.innerHTML = "";
-    labeled.forEach((item) => {
-      const r = item.route;
-      const pct = safetyPct(r.route_score);
-      const color = zoneColor(r.zone);
 
-      const card = document.createElement("button");
-      card.type = "button";
-      card.className = "card card--route";
+    labeled.forEach((item, cardIdx) => {
+      const r     = item.route;
+      const pct   = safetyPct(r.route_score);
+      const zColor = zoneColor(r.zone);
+      const rColor = routeColor(item.key);
+      const icon  = routeIcon(item.key);
+      const isSelected = item.key === state.selectedRouteKey;
+
+      // ── Card wrapper ──────────────────────────────────────────────────
+      const card = document.createElement("div");
+      card.className = "card card--route" + (isSelected ? " card--selected" : "");
       card.dataset.routeKey = item.key;
-      card.innerHTML =
-        '<div class="card__head">' +
-          '<div class="card__title">' + item.key + '</div>' +
-          '<div class="chip-badge" style="border-color:' + color + '; color:' + color + '">' + r.zone.toUpperCase() + '</div>' +
-        "</div>" +
-        '<div class="card__meta">' +
-          '<span class="pill">ETA ' + fmtMin(r.duration_s) + "</span>" +
-          '<span class="pill">' + fmtKm(r.distance_m) + "</span>" +
-          '<span class="pill pill--accent">' + pct + "%</span>" +
-        "</div>" +
-        '<div class="card__meta">' +
-          '<span class="pill">Car ' + fmtMin(r.duration_by_mode_s?.car || r.duration_s) + '</span>' +
-          '<span class="pill">Bike ' + fmtMin(r.duration_by_mode_s?.bike || r.duration_s) + '</span>' +
-          '<span class="pill">Truck ' + fmtMin(r.duration_by_mode_s?.truck || r.duration_s) + '</span>' +
-          '<span class="pill">Walk ' + fmtMin(r.duration_by_mode_s?.walk || r.duration_s) + '</span>' +
-        '</div>' +
-        '<div class="bar"><div class="bar__fill" style="width:' + pct + "%; background:" + color + '"></div></div>';
+      card.style.setProperty("--route-color", rColor);
+      card.style.cursor = "pointer";
 
+      // ── Header row ───────────────────────────────────────────────────
+      const head = document.createElement("div");
+      head.className = "card__head";
+      head.innerHTML =
+        '<div class="card__title">' +
+          '<span class="route-icon">' + icon + '</span>' +
+          '<span>' + item.key + '</span>' +
+        '</div>' +
+        '<div class="chip-badge" style="border-color:' + zColor + ';color:' + zColor + '">' +
+          r.zone.toUpperCase() +
+        '</div>';
+      card.appendChild(head);
+
+      // ── Safety score bar ─────────────────────────────────────────────
+      const barWrap = document.createElement("div");
+      barWrap.className = "bar";
+      barWrap.innerHTML =
+        '<div class="bar__fill" style="width:' + pct + '%;background:' + rColor + '"></div>';
+      card.appendChild(barWrap);
+
+      // ── Primary metrics row ──────────────────────────────────────────
+      const meta1 = document.createElement("div");
+      meta1.className = "card__meta";
+      meta1.innerHTML =
+        '<span class="pill">📍 ' + fmtKm(r.distance_m) + '</span>' +
+        '<span class="pill">⏱ ' + fmtMin(r.duration_s) + '</span>' +
+        '<span class="pill pill--accent" style="border-color:' + zColor + ';color:' + zColor + '">' +
+          '🛡 ' + pct + '%' +
+        '</span>';
+      card.appendChild(meta1);
+
+      // ── Per-mode travel times ────────────────────────────────────────
+      const modes = r.duration_by_mode_s || {};
+      const meta2 = document.createElement("div");
+      meta2.className = "card__meta card__meta--modes";
+      meta2.innerHTML =
+        '<span class="pill pill--mode">🚗 ' + fmtMin(modes.car   || r.duration_s) + '</span>' +
+        '<span class="pill pill--mode">🚲 ' + fmtMin(modes.bike  || r.duration_s) + '</span>' +
+        '<span class="pill pill--mode">🚶 ' + fmtMin(modes.walk  || r.duration_s) + '</span>' +
+        '<span class="pill pill--mode">🚛 ' + fmtMin(modes.truck || r.duration_s) + '</span>';
+      card.appendChild(meta2);
+
+      // ── Metrics detail grid ──────────────────────────────────────────
+      const detail = document.createElement("div");
+      detail.className = "card__detail";
+      const nearbyCount = r.nearby_count != null ? r.nearby_count : (r.worst_points ? r.worst_points.length : "—");
+      const worstZone = (r.worst_points && r.worst_points.length)
+        ? r.worst_points[0].zone || "—"
+        : "—";
+
+      detail.innerHTML =
+        '<div class="metric-row">' +
+          '<span class="metric-label">Safety points scanned</span>' +
+          '<span class="metric-value">' + nearbyCount + '</span>' +
+        '</div>' +
+        '<div class="metric-row">' +
+          '<span class="metric-label">Highest risk zone</span>' +
+          '<span class="metric-value" style="color:' + zoneColor(worstZone) + '">' +
+            worstZone.toUpperCase() +
+          '</span>' +
+        '</div>' +
+        '<div class="metric-row">' +
+          '<span class="metric-label">AI note</span>' +
+          '<span class="metric-value metric-value--note">' + (r.ai_message || "—") + '</span>' +
+        '</div>';
+      card.appendChild(detail);
+
+      // ── Select this route on click ───────────────────────────────────
       card.addEventListener("click", () => {
         state.selectedRouteKey = item.key;
-        [...ui.cards.querySelectorAll(".card--route")].forEach((c) => c.classList.remove("card--selected"));
+        [...ui.cards.querySelectorAll(".card--route")].forEach((c) =>
+          c.classList.remove("card--selected")
+        );
         card.classList.add("card--selected");
         focusRoute(item);
         drawRoutes(labeled);
       });
+
       ui.cards.appendChild(card);
     });
   }
 
   function drawRoutes(labeled) {
     clearRoutes();
-    labeled.forEach((item, idx) => {
+    // Draw non-selected routes first (thinner, under selected)
+    const order = [...labeled].sort((a, b) => {
+      const aS = a.key === state.selectedRouteKey ? 1 : 0;
+      const bS = b.key === state.selectedRouteKey ? 1 : 0;
+      return aS - bS;
+    });
+
+    order.forEach((item, idx) => {
       const r = item.route;
-      const color = item.key === "Safest Route" ? "#20e37f" : item.key === "Balanced Route" ? "#e3b62f" : item.key === "Fastest Route" ? "#e33456" : "#20e37f";
+      const color = routeColor(item.key);
       const isSelected = item.key === state.selectedRouteKey;
       const sourceId = "route-" + idx;
-      const layerId = "route-layer-" + idx;
+      const layerId  = "route-layer-" + idx;
       if (!r.geometry || !r.geometry.coordinates) return;
+
       map.addSource(sourceId, {
         type: "geojson",
         data: { type: "Feature", properties: {}, geometry: r.geometry },
@@ -863,19 +921,20 @@ document.getElementById("profileModal").style.display = "flex"
         source: sourceId,
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
-          "line-color": color,
-          "line-width": isSelected ? 7 : 4,
-          "line-opacity": isSelected ? 0.9 : 0.7,
+          "line-color":   color,
+          "line-width":   isSelected ? 7 : 3,
+          "line-opacity": isSelected ? 0.95 : 0.55,
         },
       });
       routeSourceIds.push(sourceId);
       routeLayerIds.push(layerId);
     });
 
+    // Dashed overlay on selected route
     const selected = labeled.find((x) => x.key === state.selectedRouteKey) || labeled[0];
     if (selected && selected.route.geometry && selected.route.geometry.coordinates) {
       if (map.getSource("route-arrows")) map.removeSource("route-arrows");
-      if (map.getLayer(arrowsLayerId)) map.removeLayer(arrowsLayerId);
+      if (map.getLayer(arrowsLayerId))   map.removeLayer(arrowsLayerId);
       map.addSource("route-arrows", {
         type: "geojson",
         data: { type: "Feature", properties: {}, geometry: selected.route.geometry },
@@ -886,9 +945,9 @@ document.getElementById("profileModal").style.display = "flex"
         source: "route-arrows",
         layout: { "line-join": "round", "line-cap": "round" },
         paint: {
-          "line-color": "#e8efff",
-          "line-width": 1.5,
-          "line-opacity": 0.35,
+          "line-color":     "#e8efff",
+          "line-width":     1.5,
+          "line-opacity":   0.35,
           "line-dasharray": [2, 2],
         },
       });
@@ -905,7 +964,6 @@ document.getElementById("profileModal").style.display = "flex"
 
     ui.incidents.innerHTML = "";
     worst.forEach((p) => {
-      // Backend now returns safety_percent (0..100) and safety_raw. Older code used safety_score.
       const scorePct =
         (typeof p.safety_percent === "number")
           ? Math.round(p.safety_percent)
@@ -928,7 +986,6 @@ document.getElementById("profileModal").style.display = "flex"
 
   function focusRoute(item) {
     const r = item.route;
-    // Show AI recommendation message (from backend)
     ui.bnReco.textContent = (r.ai_message || item.key).slice(0, 80) + (r.ai_message && r.ai_message.length > 80 ? "…" : "");
     const totalDuration = r.duration_s || 0;
     const now = new Date();
@@ -954,17 +1011,17 @@ document.getElementById("profileModal").style.display = "flex"
       return;
     }
     const placeName = ($("report-place") && $("report-place").value) ? $("report-place").value.trim() : "";
-    const desc = $("report-desc").value || "";
+    const desc      = $("report-desc").value || "";
     const ratingVal = $("report-rating").value || "";
     const res = await fetch("/api/report", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        lat: state.lastClick.lat,
-        lng: state.lastClick.lng,
+        lat:        state.lastClick.lat,
+        lng:        state.lastClick.lng,
         place_name: placeName,
         description: desc,
-        rating: ratingVal ? parseInt(ratingVal) : null,
+        rating:     ratingVal ? parseInt(ratingVal) : null,
       }),
     });
     const data = await res.json();
@@ -978,26 +1035,25 @@ document.getElementById("profileModal").style.display = "flex"
 
   $("btn-find").addEventListener("click", fetchRoutesAndScores);
   $("btn-reset").addEventListener("click", () => {
-    // Reset without reloading (performance)
     state.start = null;
-    state.end = null;
+    state.end   = null;
     state.routes = [];
     state.aiBest = null;
     state.selectedRouteKey = "Route";
     stopNavigation();
     clearRoutes();
-    if (startMarker) { startMarker.remove(); startMarker = null; }
-    if (endMarker) { endMarker.remove(); endMarker = null; }
+    if (startMarker)   { startMarker.remove();   startMarker   = null; }
+    if (endMarker)     { endMarker.remove();      endMarker     = null; }
     ui.inputStart.value = "";
-    ui.inputEnd.value = "";
-    ui.bnCurrent.textContent = "—";
-    ui.bnDest.textContent = "—";
-    ui.bnReco.textContent = "—";
-    ui.bnEta.textContent = "—";
+    ui.inputEnd.value   = "";
+    ui.bnCurrent.textContent  = "—";
+    ui.bnDest.textContent     = "—";
+    ui.bnReco.textContent     = "—";
+    ui.bnEta.textContent      = "—";
     ui.bnRemaining.textContent = "—";
-    ui.bnSpeed.textContent = "—";
-    ui.bnNext.textContent = "—";
-    ui.bnScore.textContent = "—";
+    ui.bnSpeed.textContent    = "—";
+    ui.bnNext.textContent     = "—";
+    ui.bnScore.textContent    = "—";
     setStatus("Reset complete. Search for a start and destination.");
   });
 
@@ -1019,8 +1075,6 @@ document.getElementById("profileModal").style.display = "flex"
     }
     startNavigation();
   });
-
-  // Boot runs inside map.on("load") above
 
   // ---------------------------
   // Navigation Mode
@@ -1044,20 +1098,18 @@ document.getElementById("profileModal").style.display = "flex"
       return;
     }
 
-    // Prepare navigation route geometry
     const coords = (picked.route.geometry && picked.route.geometry.coordinates) ? picked.route.geometry.coordinates : [];
     const coordsLatLng = coords.map((c) => [c[1], c[0]]);
-    state.nav.active = picked;
+    state.nav.active       = picked;
     state.nav.coordsLatLng = coordsLatLng;
-    state.nav.cumDistM = buildCumDist(coordsLatLng);
-    state.nav.startedAtMs = Date.now();
+    state.nav.cumDistM     = buildCumDist(coordsLatLng);
+    state.nav.startedAtMs  = Date.now();
     state.nav.lastRerouteAtMs = 0;
     state.navigating = true;
 
     ui.bnCurrent.textContent = "Tracking…";
     ui.bnDest.textContent = state.end ? (state.end.label || state.end.lat.toFixed(4) + ", " + state.end.lng.toFixed(4)) : "—";
 
-    // Visually highlight chosen route (dashed overlay from drawRoutes)
     setStatus("Navigation started. Following: " + picked.key);
     $("btn-start-nav").textContent = "Stop Navigation";
   }
@@ -1069,16 +1121,12 @@ document.getElementById("profileModal").style.display = "flex"
     state.nav.cumDistM = [];
     state.nav.startedAtMs = null;
     state.nav.lastRerouteAtMs = 0;
-    lastNavPos = null;
+    lastNavPos  = null;
     lastNavTime = null;
-    ui.bnNext.textContent = "—";
+    ui.bnNext.textContent  = "—";
     ui.bnSpeed.textContent = "—";
   }
 
-  /**
-   * Extract all step instructions from OSRM route for turn-by-turn.
-   * Returns array of { instruction, distanceFromStart }.
-   */
   function extractStepInstructions(routeObj) {
     const steps = [];
     let distAcc = 0;
@@ -1087,12 +1135,12 @@ document.getElementById("profileModal").style.display = "flex"
       const legSteps = leg.steps || [];
       for (const st of legSteps) {
         distAcc += (st.distance || 0);
-        const text = (st.instruction || st.ref || "").trim();
-        const name = (st.name || "").trim();
-        const m = st.maneuver || {};
-        const type = (m.type || "").trim();
+        const text     = (st.instruction || st.ref || "").trim();
+        const name     = (st.name || "").trim();
+        const m        = st.maneuver || {};
+        const type     = (m.type || "").trim();
         const modifier = (m.modifier || "").trim();
-        const instr = text || [type, modifier, name].filter(Boolean).join(" ") || "Continue";
+        const instr    = text || [type, modifier, name].filter(Boolean).join(" ") || "Continue";
         steps.push({ instruction: instr, distanceFromStart: distAcc });
       }
     }
@@ -1104,7 +1152,6 @@ document.getElementById("profileModal").style.display = "flex"
     return steps.length ? steps[0].instruction : "Continue";
   }
 
-  /** Get next waypoint instruction based on current position along route. */
   function getNextWaypointForPosition(routeObj, traveledM) {
     const steps = extractStepInstructions(routeObj);
     if (!steps.length) {
@@ -1112,32 +1159,22 @@ document.getElementById("profileModal").style.display = "flex"
       return (total - traveledM) > 200 ? "Head toward destination" : "Arrive at destination";
     }
     for (const s of steps) {
-      if (s.distanceFromStart > traveledM + 30) {
-        return s.instruction.slice(0, 50);
-      }
+      if (s.distanceFromStart > traveledM + 30) return s.instruction.slice(0, 50);
     }
     return "Arrive at destination";
   }
 
   async function rerouteFrom(lat, lng) {
-    // Avoid rapid reroutes (min 8 seconds between recalculations)
     const now = Date.now();
     if (now - state.nav.lastRerouteAtMs < 8000) return;
     state.nav.lastRerouteAtMs = now;
-
     if (!state.end) return;
-
     setStatus("You deviated from the route — recalculating…");
     state.start = { lat, lng, label: "Current Location" };
     ui.inputStart.value = "Current Location";
     setStartMarker([lat, lng], "Start: Current Location");
-
     const prevKey = state.selectedRouteKey;
-
-    // Recompute routes (keeps safety weights) — fetchRoutesAndScores resets selection to Safest
     await fetchRoutesAndScores();
-
-    // Restore user's route selection and re-draw with correct highlight
     const labeled = buildLabeledRoutes(state.routes);
     const sel = labeled.find((l) => l.key === prevKey) || labeled[0];
     state.selectedRouteKey = sel.key;
@@ -1146,175 +1183,114 @@ document.getElementById("profileModal").style.display = "flex"
     });
     focusRoute(sel);
     drawRoutes(labeled);
-
-    // Restart navigation with new route from current position
     startNavigation();
   }
 
-  /**
-   * Live navigation update: called every time geolocation updates during navigation.
-   * - Calculates remaining distance from current position to destination
-   * - Updates ETA using API travel time (proportional to remaining distance)
-   * - Tracks and displays current speed
-   * - Shows next waypoint based on position along route
-   * - Pans map to follow user
-   * - Detects deviation and triggers recalculation
-   */
   function updateNavigation(lat, lng) {
     const active = state.nav.active;
     if (!active || !active.route || !state.nav.coordsLatLng.length) return;
 
-    const near = nearestIndex(state.nav.coordsLatLng, lat, lng);
-    const idx = near.idx;
+    const near        = nearestIndex(state.nav.coordsLatLng, lat, lng);
+    const idx         = near.idx;
     const distToRoute = near.distM;
-    const total = state.nav.cumDistM[state.nav.cumDistM.length - 1] || active.route.distance_m || 0;
+    const total    = state.nav.cumDistM[state.nav.cumDistM.length - 1] || active.route.distance_m || 0;
     const traveled = state.nav.cumDistM[idx] || 0;
     const remaining = Math.max(0, total - traveled);
 
-    // Remaining distance display
     ui.bnRemaining.textContent = (remaining >= 1000 ? fmtKm(remaining) : Math.round(remaining) + " m");
 
-    // ETA: use OSRM duration (seconds) scaled by remaining distance
     const durTotal = active.route.duration_s || 0;
-    const etaS = durTotal > 0 && total > 0 ? (durTotal * (remaining / total)) : durTotal;
-    const now = new Date();
+    const etaS     = durTotal > 0 && total > 0 ? (durTotal * (remaining / total)) : durTotal;
+    const now      = new Date();
     const arriveAt = new Date(now.getTime() + etaS * 1000);
     const h = arriveAt.getHours();
     const m = arriveAt.getMinutes();
     ui.bnEta.textContent = (h % 12 || 12) + ":" + String(m).padStart(2, "0") + (h >= 12 ? " PM" : " AM");
 
-    // Current speed: compute from position delta over time
     const t = Date.now();
     if (lastNavPos && lastNavTime && (t - lastNavTime) >= 2000) {
-      const dt = (t - lastNavTime) / 1000;
-      const d = haversineM(lastNavPos[0], lastNavPos[1], lat, lng);
-      const speedMs = dt > 0 ? d / dt : 0;
+      const dt       = (t - lastNavTime) / 1000;
+      const d        = haversineM(lastNavPos[0], lastNavPos[1], lat, lng);
+      const speedMs  = dt > 0 ? d / dt : 0;
       const speedKmh = speedMs * 3.6;
       ui.bnSpeed.textContent = speedKmh < 0.5 ? "0 km/h" : speedKmh.toFixed(0) + " km/h";
-      lastNavPos = [lat, lng];
+      lastNavPos  = [lat, lng];
       lastNavTime = t;
     } else if (!lastNavPos) {
-      lastNavPos = [lat, lng];
+      lastNavPos  = [lat, lng];
       lastNavTime = t;
       ui.bnSpeed.textContent = "—";
     }
 
-    // Next waypoint from step index (position-based)
-    ui.bnNext.textContent = getNextWaypointForPosition(active.route, traveled);
-
-    // Safety level and AI recommendation
+    ui.bnNext.textContent  = getNextWaypointForPosition(active.route, traveled);
     ui.bnScore.textContent = active.route.route_score + "% (" + (active.route.zone || "—").toUpperCase() + ")";
-    ui.bnReco.textContent = (active.route.ai_message || "").slice(0, 80) + (active.route.ai_message && active.route.ai_message.length > 80 ? "…" : "");
-
-    // Current location (compact coords during nav)
+    ui.bnReco.textContent  = (active.route.ai_message || "").slice(0, 80) + (active.route.ai_message && active.route.ai_message.length > 80 ? "…" : "");
     ui.bnCurrent.textContent = lat.toFixed(4) + ", " + lng.toFixed(4);
 
-    // Pan map to follow user during navigation (smooth, like Google Maps)
     map.easeTo({ center: [lng, lat], duration: 300 });
 
-    // Deviation detection: recalculate route when user moves >80m off the path
-    if (distToRoute > 80) {
-      rerouteFrom(lat, lng);
-    }
+    if (distToRoute > 80) rerouteFrom(lat, lng);
   }
 })();
-document.addEventListener("DOMContentLoaded", function(){
+
+// ──────────────────────────────────────────
+// Profile Modal + SOS (unchanged from original)
+// ──────────────────────────────────────────
+document.addEventListener("DOMContentLoaded", function () {
 
   const saveBtn = document.getElementById("saveProfile");
-
   if (saveBtn) {
-    saveBtn.addEventListener("click", function(){
+    saveBtn.addEventListener("click", function () {
+      let name  = document.getElementById("userName").value.trim();
+      let phone = document.getElementById("userPhone").value.trim();
+      let c1    = document.getElementById("contact1").value.trim();
+      let c2    = document.getElementById("contact2").value.trim();
+      let c3    = document.getElementById("contact3").value.trim();
 
-      let name = document.getElementById("userName").value.trim()
-      let phone = document.getElementById("userPhone").value.trim()
+      if (!name || !phone) { alert("Please enter your name and phone number"); return; }
 
-      let c1 = document.getElementById("contact1").value.trim()
-      let c2 = document.getElementById("contact2").value.trim()
-      let c3 = document.getElementById("contact3").value.trim()
+      let profile = { name, phone, contacts: [c1, c2, c3] };
+      localStorage.setItem("safe_user", JSON.stringify(profile));
 
-      if(!name || !phone){
-        alert("Please enter your name and phone number");
-        return;
-      }
-
-      let profile = {
-        name:name,
-        phone:phone,
-        contacts:[c1,c2,c3]
-      }
-
-      // Keep quick local access for SOS/etc
-      localStorage.setItem("safe_user", JSON.stringify(profile))
-
-      // Persist profile on backend disk as well
       fetch("/api/save_profile", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(profile)
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
       })
         .then((res) => res.json())
-        .then((data) => {
-          console.log("Profile saved on server", data)
-        })
-        .catch((err) => {
-          console.error("Failed to save profile on server", err)
-        })
+        .then((data) => console.log("Profile saved on server", data))
+        .catch((err) => console.error("Failed to save profile on server", err));
 
-      document.getElementById("profileModal").style.display = "none"
-
-      console.log("Profile saved", profile)
-
+      document.getElementById("profileModal").style.display = "none";
+      console.log("Profile saved", profile);
     });
   }
 
   const sosBtn = document.getElementById("sosBtn");
   if (sosBtn) {
     let sosIntervalId = null;
-    let sirenAudio = null;
+    let sirenAudio    = null;
 
     const flashOverlay = document.createElement("div");
-    flashOverlay.style.position = "fixed";
-    flashOverlay.style.top = 0;
-    flashOverlay.style.left = 0;
-    flashOverlay.style.width = "100%";
-    flashOverlay.style.height = "100%";
-    flashOverlay.style.background = "rgba(255, 0, 0, 0.15)";
-    flashOverlay.style.pointerEvents = "none";
-    flashOverlay.style.zIndex = "9999";
-    flashOverlay.style.display = "none";
+    flashOverlay.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(255,0,0,0.15);pointer-events:none;z-index:9999;display:none;";
     document.body.appendChild(flashOverlay);
 
     function startAlarm() {
       try {
-        if (!sirenAudio) {
-          sirenAudio = new Audio("/static/siren.mp3");
-          sirenAudio.loop = true;
-        }
-        sirenAudio.play().catch(() => console.warn("Siren auto-play blocked by browser"));
-      } catch (e) {
-        console.warn("Siren audio not available", e);
-      }
+        if (!sirenAudio) { sirenAudio = new Audio("/static/siren.mp3"); sirenAudio.loop = true; }
+        sirenAudio.play().catch(() => console.warn("Siren auto-play blocked"));
+      } catch (e) { console.warn("Siren audio not available", e); }
       flashOverlay.style.display = "block";
-      setTimeout(() => {
-        flashOverlay.style.display = "none";
-      }, 2000);
+      setTimeout(() => { flashOverlay.style.display = "none"; }, 2000);
     }
 
     function stopAlarm() {
-      if (sirenAudio) {
-        sirenAudio.pause();
-        sirenAudio.currentTime = 0;
-      }
+      if (sirenAudio) { sirenAudio.pause(); sirenAudio.currentTime = 0; }
       flashOverlay.style.display = "none";
     }
 
     function stopTracking() {
-      if (sosIntervalId) {
-        clearInterval(sosIntervalId);
-        sosIntervalId = null;
-      }
+      if (sosIntervalId) { clearInterval(sosIntervalId); sosIntervalId = null; }
       stopAlarm();
     }
 
@@ -1322,187 +1298,89 @@ document.addEventListener("DOMContentLoaded", function(){
       return fetch("/api/get_contacts")
         .then((res) => res.json())
         .then((data) => Array.isArray(data.contacts) ? data.contacts.slice(0, 3) : [])
-        .catch((err) => {
-          console.warn("Failed to fetch /api/get_contacts", err);
-          return [];
-        });
+        .catch(() => []);
     }
 
-    function createLocationLink(lat, lng) {
-      return `https://www.google.com/maps?q=${lat},${lng}`;
-    }
+    function createLocationLink(lat, lng) { return `https://www.google.com/maps?q=${lat},${lng}`; }
 
     function sendWhatsAppMessages(lat, lng, contacts, name) {
-      const link = createLocationLink(lat, lng);
-      const message = `🚨 SOS ALERT\n${name} may be in danger.\n\nLive location:\n${link}`;
-
-      // direct server-side send (no user interaction/popups)
       return fetch("/api/send_whatsapp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lat, lng, name, contacts, message }),
-      })
-        .then((res) => res.json())
-        .then((data) => {
-          console.log("WhatsApp server send result", data);
-          return data;
-        })
-        .catch((err) => {
-          console.error("WhatsApp server send failed", err);
-          return { error: err.message || "send failed" };
-        });
+        body: JSON.stringify({ lat, lng, name, contacts }),
+      }).then((r) => r.json()).catch((e) => ({ error: e.message }));
     }
 
     function callSosApi(lat, lng, profile, source, contacts) {
-      const link = createLocationLink(lat, lng);
-      const alertData = {
-        name: profile.name,
-        phone: profile.phone,
-        contacts: contacts || profile.contacts || [],
-        lat,
-        lng,
-        map_link: link,
-        time: new Date().toISOString(),
-        location_source: source,
-      };
-
       return fetch("/api/sos_alert", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(alertData),
+        body: JSON.stringify({
+          name: profile.name, phone: profile.phone,
+          contacts: contacts || profile.contacts || [],
+          lat, lng, map_link: createLocationLink(lat, lng),
+          time: new Date().toISOString(), location_source: source,
+        }),
       })
-        .then((res) => res.json())
-        .then((data) => {
-          console.log("SOS logged:", data);
-          alert("🚨 Emergency alert triggered! Location sent.");
-          return data;
-        })
-        .catch((err) => {
-          console.error("SOS log failed:", err);
-          alert("🚨 Emergency alert attempted, but server call failed. Check console.");
-          return null;
-        });
+        .then((r) => r.json())
+        .then((d) => { console.log("SOS logged:", d); alert("🚨 Emergency alert triggered! Location sent."); return d; })
+        .catch((e) => { console.error("SOS log failed:", e); alert("🚨 Emergency alert attempted, server call failed."); return null; });
     }
 
     function askManualLocation(profile, contacts) {
-      const manualAddr = prompt("Unable to fetch GPS position. Enter your best-known location (e.g., '17.3850,78.4867' or address):");
-      if (!manualAddr) {
-        alert("SOS aborted: no location provided.");
-        stopTracking();
-        return;
+      const input = prompt("Unable to fetch GPS. Enter location (e.g., '17.3850,78.4867'):");
+      if (!input) { alert("SOS aborted."); stopTracking(); return; }
+      const m = input.trim().match(/^\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)\s*$/);
+      if (m) {
+        const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+        if (!isNaN(lat) && !isNaN(lng)) { sendWhatsAppMessages(lat, lng, contacts, profile.name); return callSosApi(lat, lng, profile, "manual-typed", contacts); }
       }
-
-      let latLngMatch = manualAddr.trim().match(/^\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)\s*$/);
-      if (latLngMatch) {
-        const lat = parseFloat(latLngMatch[1]);
-        const lng = parseFloat(latLngMatch[2]);
-        if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
-          sendWhatsAppMessages(lat, lng, contacts, profile.name);
-          return callSosApi(lat, lng, profile, "manual-typed", contacts);
-        }
-      }
-
-      const fallbackLat = 17.385;
-      const fallbackLng = 78.4867;
-      alert("Invalid manual location input. Using fallback coordinates.");
-      sendWhatsAppMessages(fallbackLat, fallbackLng, contacts, profile.name);
-      return callSosApi(fallbackLat, fallbackLng, profile, "fallback-default", contacts);
+      sendWhatsAppMessages(17.385, 78.4867, contacts, profile.name);
+      return callSosApi(17.385, 78.4867, profile, "fallback-default", contacts);
     }
 
     sosBtn.addEventListener("click", async function () {
       const profile = JSON.parse(localStorage.getItem("safe_user"));
-      if (!profile || !profile.name || !profile.phone) {
-        alert("Please setup your safety profile first");
-        return;
-      }
+      if (!profile || !profile.name || !profile.phone) { alert("Please setup your safety profile first"); return; }
 
       let contacts = await getContactsFromServer();
-      if (!contacts || contacts.length === 0) {
-        contacts = profile.contacts || [];
-      }
-      if (!contacts || contacts.length === 0) {
-        alert("No emergency contacts configured. Please set up at least one contact.");
-        return;
-      }
+      if (!contacts || !contacts.length) contacts = profile.contacts || [];
+      if (!contacts || !contacts.length) { alert("No emergency contacts configured."); return; }
 
       startAlarm();
-      startTracking(profile, contacts);
 
       const triggerOnce = (lat, lng, source) => {
         sendWhatsAppMessages(lat, lng, contacts, profile.name);
-        // Only send SMS/log once at the initial trigger
         callSosApi(lat, lng, profile, source, contacts);
       };
 
-      const geolocate = () => {
-        navigator.geolocation.getCurrentPosition(
-          function (pos) {
-            triggerOnce(pos.coords.latitude, pos.coords.longitude, "gps");
-          },
-          function (err) {
-            console.error("Geolocation error:", err.code, err.message);
-            if (err.code === 1) {
-              alert("Location permission denied. Please allow location access and retry.");
-              stopTracking();
-              return;
-            }
-            if (err.code === 2) {
-              alert("Location unavailable. Trying again in low accuracy mode...");
-              return reattemptLowAccuracy();
-            }
-            if (err.code === 3) {
-              alert("Location request timed out. Trying again in low accuracy mode...");
-              return reattemptLowAccuracy();
-            }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => triggerOnce(pos.coords.latitude, pos.coords.longitude, "gps"),
+        (err) => {
+          if (err.code === 1) { alert("Location denied."); stopTracking(); return; }
+          navigator.geolocation.getCurrentPosition(
+            (pos) => triggerOnce(pos.coords.latitude, pos.coords.longitude, "gps-low-accuracy"),
+            () => askManualLocation(profile, contacts),
+            { enableHighAccuracy: false, timeout: 20000, maximumAge: 60000 }
+          );
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      );
 
-            askManualLocation(profile, contacts);
-          },
-          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-        );
-      };
-
-      const reattemptLowAccuracy = () => {
-        navigator.geolocation.getCurrentPosition(
-          function (pos) {
-            triggerOnce(pos.coords.latitude, pos.coords.longitude, "gps-low-accuracy");
-          },
-          function () {
-            askManualLocation(profile, contacts);
-          },
-          { enableHighAccuracy: false, timeout: 20000, maximumAge: 60000 }
-        );
-      };
-
-      geolocate();
-    });
-
-    function startTracking(profile, contacts) {
-      if (sosIntervalId) {
-        clearInterval(sosIntervalId);
-      }
+      // Periodic location updates
       sosIntervalId = setInterval(() => {
         navigator.geolocation.getCurrentPosition(
-          function (pos) {
-            const lat = pos.coords.latitude;
-            const lng = pos.coords.longitude;
-            // only send updated location via backend WhatsApp API; do not open new tabs
+          (pos) => {
             fetch("/api/send_whatsapp", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ lat, lng, name: profile.name, contacts }),
-            })
-              .then((r) => r.json())
-              .then((d) => console.log("Tracking WhatsApp send", d))
-              .catch((e) => console.warn(e));
-            // No repeated SMS/log calls in tracking interval
+              body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude, name: profile.name, contacts }),
+            }).catch(() => {});
           },
-          function (err) {
-            console.warn("Tracking geolocation error:", err.code, err.message);
-          },
+          () => {},
           { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
         );
       }, 10000);
-    }
+    });
   }
-
 });
