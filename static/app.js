@@ -152,7 +152,14 @@
   }
 
   let startAbort=null,endAbort=null;
-  async function fetchSuggestions(q,ctrl){let url="/api/autocomplete?q="+encodeURIComponent(q);if(state.start?.lat)url+=`&near_lat=${state.start.lat}&near_lng=${state.start.lng}`;return(await fetch(url,{signal:ctrl.signal})).json();}
+  async function fetchSuggestions(q,ctrl){
+    // Call Nominatim directly from browser (server-side calls get 403 blocked by Nominatim on cloud IPs)
+    const params=new URLSearchParams({format:"json",q,limit:"8",addressdetails:"1",namedetails:"1",countrycodes:"in","accept-language":"en"});
+    if(state.start?.lat){params.set("viewbox",`${state.start.lng-0.5},${state.start.lat+0.5},${state.start.lng+0.5},${state.start.lat-0.5}`);}
+    const res=await fetch("https://nominatim.openstreetmap.org/search?"+params,{signal:ctrl.signal,headers:{"Accept-Language":"en"}});
+    const data=await res.json();
+    return{results:data.map(item=>({display_name:item.display_name,name:(item.namedetails?.name||(item.display_name||"").split(",")[0].trim()),lat:parseFloat(item.lat),lng:parseFloat(item.lon),type:item.type,class:item.class}))};
+  }
   function renderSuggestions(container,payload,onPick){
     container.innerHTML="";const results=payload?.results||[];if(!results.length){container.classList.remove("suggest--open");return;}
     if(payload?.message){const m=document.createElement("div");m.className="suggest__msg";m.textContent=payload.message;container.appendChild(m);}
@@ -179,7 +186,7 @@
     return[{key:"Safest Route",route:s},{key:"Balanced Route",route:b},{key:"Fastest Route",route:f}];
   }
 
-  async function geocodeAddress(q){const r=await fetch("/api/geocode?q="+encodeURIComponent(q));return r.ok?r.json():null;}
+  async function geocodeAddress(q){try{const params=new URLSearchParams({format:"json",q,limit:"1",addressdetails:"1",countrycodes:"in","accept-language":"en"});const res=await fetch("https://nominatim.openstreetmap.org/search?"+params,{headers:{"Accept-Language":"en"}});const data=await res.json();if(!data?.length)return null;return{lat:parseFloat(data[0].lat),lng:parseFloat(data[0].lon),display_name:data[0].display_name};}catch(_){return null;}}
 
   async function fetchRoutesAndScores(){
     const si=ui.inputStart.value.trim(),ei=ui.inputEnd.value.trim();

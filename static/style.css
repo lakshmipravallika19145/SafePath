@@ -642,11 +642,99 @@ body{
   body{ overflow:auto; }
   .app-shell{
     grid-template-columns: 1fr;
-    padding: 12px 12px 96px;
+    grid-template-rows: auto;
+    padding: 8px 8px 100px;
+    gap: 10px;
+    height: auto;
   }
-  .map-wrap{ height: 60vh; }
-  .sidebar{ order: 2; }
+  .map-wrap{
+    height: 45vh;
+    min-height: 260px;
+    order: 1;
+  }
+  .sidebar{
+    order: 0; /* sidebar ABOVE map */
+    padding: 10px;
+    gap: 10px;
+  }
   .right{ display:none; }
+
+  /* Brand compact on mobile */
+  .brand{ padding: 6px 8px; }
+  .brand__logo{ width:32px; height:32px; }
+  .brand__title{ font-size: 14px; }
+
+  /* Inputs full width, larger touch targets, no iOS zoom */
+  .field__input{
+    font-size: 16px; /* prevents iOS auto-zoom on focus */
+    padding: 12px 14px;
+    width: 100%;
+  }
+
+  /* Suggest dropdown scrollable on mobile */
+  .suggest--open{
+    max-height: 200px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Buttons full width and easy to tap */
+  .row{ flex-direction: column; gap: 8px; }
+  .btn{ width: 100%; padding: 13px 14px; font-size: 15px; }
+
+  /* Route cards compact */
+  .card{ padding: 10px; }
+  .card__head{ flex-wrap: wrap; }
+  .card__meta{ gap: 6px; }
+  .pill{ font-size: 11px; padding: 5px 8px; }
+
+  /* Bottom nav — stack vertically, scrollable */
+  .bottom-nav{
+    left: 8px; right: 8px; bottom: 8px;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 10px;
+    gap: 8px;
+    min-height: auto;
+  }
+  .bottom-nav__left{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    max-height: none;
+    overflow: visible;
+  }
+  .mini{ min-width: 0; max-width: none; }
+  .mini__value{ font-size: 11px; }
+  .mini--wide{ grid-column: span 2; }
+
+  /* Auth bar wraps on mobile */
+  #auth-bar{
+    flex-wrap: wrap;
+    height: auto;
+    padding: 6px 10px;
+    gap: 6px;
+  }
+  #auth-bar .auth-brand{ font-size: 0.82rem; }
+
+  /* Chips wrapping */
+  .chips{ gap: 6px; }
+  .chip{ font-size: 11px; padding: 6px 8px; }
+
+  /* Toggles easier to tap */
+  .toggle{ padding: 12px 10px; }
+  .toggle__text{ font-size: 12px; }
+
+  /* Nav banner full width */
+  .nav-banner{ left: 8px; right: 8px; }
+
+  /* Section titles smaller */
+  .section__title{ font-size: 11px; }
+
+  /* Map top badges */
+  .map-top{ top: 8px; left: 8px; right: 8px; }
+  .badge{ font-size: 11px; padding: 6px 8px; }
+  .status{ font-size: 12px; padding: 8px 10px; }
 }
 .profile-modal{
 position:fixed;
