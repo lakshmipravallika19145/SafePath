@@ -49,22 +49,17 @@ db = SQLAlchemy()
 
 
 def _build_db_uri():
-    # Render PostgreSQL (production)
     database_url = os.getenv("DATABASE_URL")
     if database_url:
-        # Render gives postgres:// but SQLAlchemy needs postgresql://
         if database_url.startswith("postgres://"):
             database_url = database_url.replace("postgres://", "postgresql://", 1)
         return database_url
-    # Local MySQL (development)
     try:
         import pymysql
         return "mysql+pymysql://root:Qazqaz12%23@localhost/saferoute"
     except ImportError:
         pass
     return f"sqlite:///{BASE_DIR / 'saferoute.db'}"
-
-
 # ══════════════════════════════════════════════════════════════
 # Models
 # ══════════════════════════════════════════════════════════════

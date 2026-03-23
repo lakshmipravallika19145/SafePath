@@ -521,89 +521,63 @@
   <!-- ══════════════════════════════════════════════════════
        MOBILE SHEET + LOCATION POPUP JS
   ══════════════════════════════════════════════════════════ --></p>
-<!-- 
-  DASHBOARD.HTML PATCH
-  ====================
-  Find the MOBILE SHEET + LOCATION POPUP JS script block near the bottom of dashboard.html.
-  It starts with:    <script>
-                     (function(){
-                       const isMobile = () => window.innerWidth <= 760;
+  <script>
+  (function(){
+    const isMobile = () => window.innerWidth <= 760;
+    if (!isMobile()) return; // desktop: do nothing
 
-  Replace that ENTIRE <script>...</script> block with the one below.
-  
-  Changes made:
-  1. loc-retry-btn now calls window._spRetryGeoWatch() (the persistent watcher)
-     instead of navigator.geolocation.getCurrentPosition() (one-shot — was broken)
-  2. sp:locationDenied event wired correctly to show popup
-  3. setInterval(mirrorNavStats, 1000) replaced with MutationObserver
-     (interval caused unnecessary CPU usage; observer is instant and exact)
-  4. No other HTML changes needed.
--->
+    const $ = id => document.getElementById(id);
 
-<script>
-(function(){
-  const isMobile = () => window.innerWidth <= 760;
-  if (!isMobile()) return;
+    /* ── Sheet drag/tap to expand/collapse ──────────────── */
+    const sheet  = $("mobile-sheet");
+    const handle = $("sheet-handle");
+    let sheetOpen = false;
 
-  const $ = id => document.getElementById(id);
+    function openSheet()  { sheet.classList.remove("sheet--collapsed"); sheet.classList.add("sheet--expanded");  sheetOpen=true; }
+    function closeSheet() { sheet.classList.add("sheet--collapsed");    sheet.classList.remove("sheet--expanded"); sheetOpen=false; }
 
-  /* ── Sheet drag/tap to expand/collapse ──────────────── */
-  const sheet  = $("mobile-sheet");
-  const handle = $("sheet-handle");
-  let sheetOpen = false;
+    handle.addEventListener("click", () => sheetOpen ? closeSheet() : openSheet());
 
-  function openSheet()  { sheet.classList.remove("sheet--collapsed"); sheet.classList.add("sheet--expanded");  sheetOpen=true; }
-  function closeSheet() { sheet.classList.add("sheet--collapsed");    sheet.classList.remove("sheet--expanded"); sheetOpen=false; }
+    // swipe up/down
+    let touchY0 = null;
+    sheet.addEventListener("touchstart", e => { touchY0 = e.touches[0].clientY; }, {passive:true});
+    sheet.addEventListener("touchend",   e => {
+      if (touchY0 === null) return;
+      const dy = touchY0 - e.changedTouches[0].clientY;
+      if (dy > 40)  openSheet();
+      if (dy < -40) closeSheet();
+      touchY0 = null;
+    }, {passive:true});
 
-  handle.addEventListener("click", () => sheetOpen ? closeSheet() : openSheet());
+    // open sheet when user taps search inputs
+    $("mob-input-start").addEventListener("focus", openSheet);
+    $("mob-input-dest").addEventListener("focus",  openSheet);
 
-  let touchY0 = null;
-  sheet.addEventListener("touchstart", e => { touchY0 = e.touches[0].clientY; }, {passive:true});
-  sheet.addEventListener("touchend",   e => {
-    if (touchY0 === null) return;
-    const dy = touchY0 - e.changedTouches[0].clientY;
-    if (dy > 40)  openSheet();
-    if (dy < -40) closeSheet();
-    touchY0 = null;
-  }, {passive:true});
+    /* ── Filters accordion ──────────────────────────────── */
+    $("mob-filters-toggle").addEventListener("click", () => {
+      const body = $("mob-filters-body");
+      const toggle = $("mob-filters-toggle");
+      body.classList.toggle("open");
+      toggle.classList.toggle("open");
+    });
 
-  $("mob-input-start").addEventListener("focus", openSheet);
-  $("mob-input-dest").addEventListener("focus",  openSheet);
+    /* ── Mirror desktop filter toggles → mobile ─────────── */
+    ["light","crowd","police","crime","cctv"].forEach(k => {
+      const desk = $("t-"+k), mob = $("mob-t-"+k);
+      if (!desk || !mob) return;
+      mob.addEventListener("change", () => { desk.checked = mob.checked; });
+    });
 
-  /* ── Filters accordion ──────────────────────────────── */
-  $("mob-filters-toggle").addEventListener("click", () => {
-    const body = $("mob-filters-body");
-    const toggle = $("mob-filters-toggle");
-    body.classList.toggle("open");
-    toggle.classList.toggle("open");
-  });
+    /* ── Location popup ─────────────────────────────────── */
+    const locPopup = $("location-popup");
+    function showLocPopup() { locPopup.classList.add("active"); }
+    function hideLocPopup() { locPopup.classList.remove("active"); }
 
-  /* ── Mirror desktop filter toggles → mobile ─────────── */
-  ["light","crowd","police","crime","cctv"].forEach(k => {
-    const desk = $("t-"+k), mob = $("mob-t-"+k);
-    if (!desk || !mob) return;
-    mob.addEventListener("change", () => { desk.checked = mob.checked; });
-  });
-
-  /* ══════════════════════════════════════════════════════
-     FIX 1: Location popup
-     loc-retry-btn now calls the PERSISTENT watchPosition watcher
-     (window._spRetryGeoWatch) instead of a one-shot getCurrentPosition.
-     This is the fix for the popup that kept reappearing.
-  ══════════════════════════════════════════════════════ */
-  const locPopup = $("location-popup");
-  function showLocPopup() { locPopup.classList.add("active"); }
-  function hideLocPopup() { locPopup.classList.remove("active"); }
-
-  $("loc-retry-btn").addEventListener("click", () => {
-    hideLocPopup();
-    // Use the persistent watcher from app.js (clears old watcher + starts fresh)
-    if (typeof window._spRetryGeoWatch === "function") {
-      window._spRetryGeoWatch();
-    } else {
-      // Fallback: one-shot just to unblock the user
+    $("loc-retry-btn").addEventListener("click", () => {
+      hideLocPopup();
       navigator.geolocation.getCurrentPosition(
         pos => {
+          // success — update the app state via a custom event
           document.dispatchEvent(new CustomEvent("sp:locationGranted", {
             detail: { lat: pos.coords.latitude, lng: pos.coords.longitude }
           }));
@@ -611,198 +585,436 @@
         () => showLocPopup(),
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
-    }
-  });
-
-  $("loc-skip-btn").addEventListener("click", hideLocPopup);
-
-  // Show popup when geolocation is denied
-  document.addEventListener("sp:locationDenied", showLocPopup);
-
-  /* ── Mobile status mirror ────────────────────────────── */
-  const desktopStatus = $("status");
-  const mobStatus     = $("mob-status");
-  if (desktopStatus && mobStatus) {
-    const obs = new MutationObserver(() => {
-      mobStatus.textContent = desktopStatus.textContent;
     });
-    obs.observe(desktopStatus, { childList:true, subtree:true, characterData:true });
-  }
+    $("loc-skip-btn").addEventListener("click", hideLocPopup);
 
-  /* ── Wire mobile search inputs to app.js state ───────── */
-  function syncToDesktop(mobInput, deskInput, sugMob, sugDesk) {
-    mobInput.addEventListener("input", () => {
-      deskInput.value = mobInput.value;
-      deskInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const obs = new MutationObserver(() => {
-      sugMob.innerHTML = sugDesk.innerHTML;
-      if (sugDesk.classList.contains("suggest--open")) {
-        sugMob.classList.add("suggest--open");
-      } else {
-        sugMob.classList.remove("suggest--open");
-      }
-      sugMob.querySelectorAll(".suggest__item").forEach((btn, i) => {
-        const orig = sugDesk.querySelectorAll(".suggest__item")[i];
-        if (orig) btn.addEventListener("click", () => orig.click());
+    // Show popup if geolocation denied
+    document.addEventListener("sp:locationDenied", showLocPopup);
+
+    /* ── Mobile status mirror ────────────────────────────── */
+    const desktopStatus = $("status");
+    const mobStatus     = $("mob-status");
+    if (desktopStatus && mobStatus) {
+      const obs = new MutationObserver(() => {
+        mobStatus.textContent = desktopStatus.textContent;
       });
-    });
-    obs.observe(sugDesk, { childList: true, attributes: true, attributeFilter: ["class"] });
-  }
+      obs.observe(desktopStatus, { childList:true, subtree:true, characterData:true });
+    }
 
-  syncToDesktop(
-    $("mob-input-start"), $("input-current"),
-    $("mob-suggest-start"), $("suggest-current")
-  );
-  syncToDesktop(
-    $("mob-input-dest"), $("input-dest"),
-    $("mob-suggest-dest"), $("suggest-dest")
-  );
-
-  /* ── Mobile Find Routes button ───────────────────────── */
-  $("mob-btn-find").addEventListener("click", () => {
-    closeSheet();
-    $("btn-find").click();
-  });
-
-  /* ── Mobile Reset button ─────────────────────────────── */
-  $("mob-btn-reset").addEventListener("click", () => {
-    $("mob-input-start").value = "";
-    $("mob-input-dest").value  = "";
-    $("mob-peek-dest").innerHTML = "<span>Where do you want to go?</span>";
-    $("mob-peek-score").textContent = "";
-    $("mob-routes-section").style.display = "none";
-    $("btn-reset").click();
-  });
-
-  /* ── Mobile Nav button ───────────────────────────────── */
-  $("mob-btn-nav").addEventListener("click", () => {
-    closeSheet();
-    $("btn-start-nav").click();
-  });
-
-  /* ── Mobile SOS ──────────────────────────────────────── */
-  $("mob-btn-sos").addEventListener("click", () => {
-    $("sosBtn").click();
-  });
-
-  /* ── Sync stop nav ───────────────────────────────────── */
-  $("mnb-stop-btn").addEventListener("click", () => {
-    $("nav-stop-btn").click();
-  });
-
-  /* ── Mirror route cards to mobile horizontal scroll ──── */
-  const desktopCards = $("route-cards");
-  const mobScroll    = $("mob-route-scroll");
-  const mobSection   = $("mob-routes-section");
-
-  function routeColor(k) {
-    return k==="Safest Route"?"#20e37f":k==="Balanced Route"?"#e3b62f":k==="Fastest Route"?"#e33456":"#20e37f";
-  }
-  function routeIcon(k) {
-    return k==="Safest Route"?"🛡️":k==="Balanced Route"?"⚖️":k==="Fastest Route"?"⚡":"📍";
-  }
-
-  const cardsObs = new MutationObserver(() => {
-    const cards = desktopCards.querySelectorAll(".card--route");
-    if (!cards.length) return;
-    mobScroll.innerHTML = "";
-    cards.forEach(card => {
-      const key   = card.dataset.routeKey || "Route";
-      const title = card.querySelector(".card__title")?.textContent || key;
-      const pills = [...card.querySelectorAll(".pill")].map(p => p.textContent);
-      const barW  = card.querySelector(".bar__fill")?.style.width || "0%";
-      const badge = card.querySelector(".chip-badge")?.textContent || "";
-      const rc    = routeColor(key);
-
-      const mc = document.createElement("div");
-      mc.className = "sheet__route-card" + (card.classList.contains("card--selected") ? " selected" : "");
-      mc.dataset.routeKey = key;
-      mc.style.setProperty("--route-color", rc);
-      mc.innerHTML = `
-        <div style="font-size:12px;font-weight:800;margin-bottom:6px">${routeIcon(key)} ${title}</div>
-        <div style="height:6px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden;margin-bottom:8px">
-          <div style="height:100%;width:${barW};background:${rc};border-radius:99px"></div>
-        </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          ${pills.slice(0,3).map(p=>`<span style="font-size:10px;padding:3px 7px;border-radius:99px;background:rgba(255,255,255,0.06);color:var(--muted)">${p}</span>`).join("")}
-        </div>
-        ${badge?`<div style="margin-top:6px;font-size:10px;font-weight:700;color:${rc}">${badge}</div>`:""}
-      `;
-      mc.addEventListener("click", () => {
-        desktopCards.querySelectorAll(".card--route").forEach(c => {
-          if ((c.dataset.routeKey||"") === key) c.click();
+    /* ── Wire mobile search inputs to app.js state ───────── */
+    // app.js exposes ui.inputStart / ui.inputEnd — we mirror mobile inputs
+    function syncToDesktop(mobInput, deskInput, sugMob, sugDesk) {
+      // keep desktop input in sync (app.js listens to desktop inputs)
+      mobInput.addEventListener("input", () => {
+        deskInput.value = mobInput.value;
+        deskInput.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      // mirror suggestions from desktop suggest div to mobile
+      const obs = new MutationObserver(() => {
+        sugMob.innerHTML = sugDesk.innerHTML;
+        if (sugDesk.classList.contains("suggest--open")) {
+          sugMob.classList.add("suggest--open");
+        } else {
+          sugMob.classList.remove("suggest--open");
+        }
+        // rewire click events on cloned buttons
+        sugMob.querySelectorAll(".suggest__item").forEach((btn, i) => {
+          const orig = sugDesk.querySelectorAll(".suggest__item")[i];
+          if (orig) btn.addEventListener("click", () => orig.click());
         });
-        mobScroll.querySelectorAll(".sheet__route-card").forEach(c =>
-          c.classList.toggle("selected", c.dataset.routeKey === key)
-        );
-        updatePeekBar();
       });
-      mobScroll.appendChild(mc);
+      obs.observe(sugDesk, { childList: true, attributes: true, attributeFilter: ["class"] });
+    }
+
+    syncToDesktop(
+      $("mob-input-start"), $("input-current"),
+      $("mob-suggest-start"), $("suggest-current")
+    );
+    syncToDesktop(
+      $("mob-input-dest"), $("input-dest"),
+      $("mob-suggest-dest"), $("suggest-dest")
+    );
+
+    /* ── Mobile Find Routes button ───────────────────────── */
+    $("mob-btn-find").addEventListener("click", () => {
+      closeSheet();
+      $("btn-find").click();
     });
-    mobSection.style.display = "block";
-    updatePeekBar();
-    openSheet();
-  });
-  cardsObs.observe(desktopCards, { childList: true, subtree: true });
 
-  function updatePeekBar() {
-    const destVal = $("mob-input-dest").value || $("input-dest").value || "";
-    const score   = $("bn-score")?.textContent || "";
-    if (destVal) {
-      $("mob-peek-dest").textContent = "→ " + destVal;
+    /* ── Mobile Reset button ─────────────────────────────── */
+    $("mob-btn-reset").addEventListener("click", () => {
+      $("mob-input-start").value = "";
+      $("mob-input-dest").value  = "";
+      $("mob-peek-dest").innerHTML = "<span>Where do you want to go?</span>";
+      $("mob-peek-score").textContent = "";
+      $("mob-routes-section").style.display = "none";
+      $("btn-reset").click();
+    });
+
+    /* ── Mobile Nav button ───────────────────────────────── */
+    $("mob-btn-nav").addEventListener("click", () => {
+      closeSheet();
+      $("btn-start-nav").click();
+    });
+
+    /* ── Mobile SOS ──────────────────────────────────────── */
+    $("mob-btn-sos").addEventListener("click", () => {
+      $("sosBtn").click();
+    });
+
+    /* ── Sync stop nav ───────────────────────────────────── */
+    $("mnb-stop-btn").addEventListener("click", () => {
+      $("nav-stop-btn").click();
+    });
+
+    /* ── Mirror route cards to mobile horizontal scroll ──── */
+    const desktopCards = $("route-cards");
+    const mobScroll    = $("mob-route-scroll");
+    const mobSection   = $("mob-routes-section");
+
+    function routeColor(k) {
+      return k==="Safest Route"?"#20e37f":k==="Balanced Route"?"#e3b62f":k==="Fastest Route"?"#e33456":"#20e37f";
     }
-    if (score && score !== "—") $("mob-peek-score").textContent = score;
-  }
-
-  /* ── Mirror navigation state to mobile nav bar ────────── */
-  const navBanner    = $("nav-banner");
-  const mobileNavBar = $("mobile-nav-bar");
-  const navObs = new MutationObserver(() => {
-    if (navBanner.classList.contains("active")) {
-      mobileNavBar.classList.add("active");
-      sheet.style.display = "none";
-    } else {
-      mobileNavBar.classList.remove("active");
-      sheet.style.display = "";
+    function routeIcon(k) {
+      return k==="Safest Route"?"🛡️":k==="Balanced Route"?"⚖️":k==="Fastest Route"?"⚡":"📍";
     }
-  });
-  navObs.observe(navBanner, { attributes: true, attributeFilter: ["class"] });
+    function fmtKm(m) { return (m/1000).toFixed(1)+" km"; }
+    function fmtMin(s){ return Math.max(1,Math.round(s/60))+" min"; }
 
-  /* ══════════════════════════════════════════════════════
-     FIX 2 & 4: Replace setInterval(mirrorNavStats,1000) with
-     MutationObserver on the nav stat elements.
-     This mirrors stats instantly when app.js updates them,
-     with zero polling overhead.
-  ══════════════════════════════════════════════════════ */
-  function observeNavStat(srcId, destId) {
-    const src  = $(srcId);
-    const dest = $(destId);
-    if (!src || !dest) return;
-    // Mirror immediately
-    dest.textContent = src.textContent;
-    // Then watch for changes
-    new MutationObserver(() => {
-      dest.textContent = src.textContent;
-    }).observe(src, { childList: true, subtree: true, characterData: true });
-  }
+    const cardsObs = new MutationObserver(() => {
+      const cards = desktopCards.querySelectorAll(".card--route");
+      if (!cards.length) return;
+      mobScroll.innerHTML = "";
+      cards.forEach(card => {
+        const key   = card.dataset.routeKey || "Route";
+        const title = card.querySelector(".card__title")?.textContent || key;
+        const pills = [...card.querySelectorAll(".pill")].map(p => p.textContent);
+        const barW  = card.querySelector(".bar__fill")?.style.width || "0%";
+        const badge = card.querySelector(".chip-badge")?.textContent || "";
+        const rc    = routeColor(key);
 
-  observeNavStat("nav-remaining", "mnb-remaining");
-  observeNavStat("nav-eta",       "mnb-eta");
-  observeNavStat("nav-speed",     "mnb-speed");
-  observeNavStat("nav-safety",    "mnb-safety");
+        const mc = document.createElement("div");
+        mc.className = "sheet__route-card" + (card.classList.contains("card--selected") ? " selected" : "");
+        mc.dataset.routeKey = key;
+        mc.style.setProperty("--route-color", rc);
+        mc.innerHTML = `
+          <div style="font-size:12px;font-weight:800;margin-bottom:6px">${routeIcon(key)} ${title}</div>
+          <div style="height:6px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden;margin-bottom:8px">
+            <div style="height:100%;width:${barW};background:${rc};border-radius:99px"></div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${pills.slice(0,3).map(p=>`<span style="font-size:10px;padding:3px 7px;border-radius:99px;background:rgba(255,255,255,0.06);color:var(--muted)">${p}</span>`).join("")}
+          </div>
+          ${badge?`<div style="margin-top:6px;font-size:10px;font-weight:700;color:${rc}">${badge}</div>`:""}
+        `;
+        mc.addEventListener("click", () => {
+          // find and click the matching desktop card
+          desktopCards.querySelectorAll(".card--route").forEach(c => {
+            if ((c.dataset.routeKey||"") === key) c.click();
+          });
+          // update selected state in mobile
+          mobScroll.querySelectorAll(".sheet__route-card").forEach(c =>
+            c.classList.toggle("selected", c.dataset.routeKey === key)
+          );
+          // update peek bar
+          updatePeekBar();
+        });
+        mobScroll.appendChild(mc);
+      });
+      mobSection.style.display = "block";
+      updatePeekBar();
+      openSheet();
+    });
+    cardsObs.observe(desktopCards, { childList: true, subtree: true });
 
-  /* ── Mirror mob-btn-nav text with btn-start-nav ─────── */
-  const desktopNavBtn = $("btn-start-nav");
-  const mobNavBtn     = $("mob-btn-nav");
-  const navBtnObs = new MutationObserver(() => {
-    mobNavBtn.textContent = desktopNavBtn.textContent.includes("Stop")
-      ? "■ Stop Navigation"
-      : "▶ Start Navigation";
-  });
-  navBtnObs.observe(desktopNavBtn, { childList: true });
+    function updatePeekBar() {
+      const destVal = $("mob-input-dest").value || $("input-dest").value || "";
+      const score   = $("bn-score")?.textContent || "";
+      if (destVal) {
+        $("mob-peek-dest").textContent = "→ " + destVal;
+      }
+      if (score && score !== "—") $("mob-peek-score").textContent = score;
+    }
 
-})();
-</script>
+    /* ── Mirror navigation state to mobile nav bar ────────── */
+    const navBanner = $("nav-banner");
+    const mobileNavBar = $("mobile-nav-bar");
+    const navObs = new MutationObserver(() => {
+      if (navBanner.classList.contains("active")) {
+        mobileNavBar.classList.add("active");
+        sheet.style.display = "none";
+      } else {
+        mobileNavBar.classList.remove("active");
+        sheet.style.display = "";
+      }
+    });
+    navObs.observe(navBanner, { attributes: true, attributeFilter: ["class"] });
+
+    // mirror nav stats
+    function mirrorNavStats() {
+      const rem  = $("nav-remaining")?.textContent;
+      const eta  = $("nav-eta")?.textContent;
+      const spd  = $("nav-speed")?.textContent;
+      const safe = $("nav-safety")?.textContent;
+      if (rem)  $("mnb-remaining").textContent = rem;
+      if (eta)  $("mnb-eta").textContent = eta;
+      if (spd)  $("mnb-speed").textContent = spd;
+      if (safe) $("mnb-safety").textContent = safe;
+    }
+    setInterval(mirrorNavStats, 1000);
+
+    /* ── Mirror mob-btn-nav text with btn-start-nav ─────── */
+    const desktopNavBtn = $("btn-start-nav");
+    const mobNavBtn     = $("mob-btn-nav");
+    const navBtnObs = new MutationObserver(() => {
+      mobNavBtn.textContent = desktopNavBtn.textContent.includes("Stop")
+        ? "■ Stop Navigation"
+        : "▶ Start Navigation";
+    });
+    navBtnObs.observe(desktopNavBtn, { childList: true });
+
+  })();
+  </script>
+  <script>
+  (function () {
+    let currentUser = null;
+    const $ = id => document.getElementById(id);
+
+    // ── Helpers ───────────────────────────────────────────
+    function showErr(id, msg) { const el=$(id); if(el){el.textContent=msg;el.classList.add("show");} }
+    function hideErr(id)      { const el=$(id); if(el) el.classList.remove("show"); }
+    function showOk(id)       { const el=$(id); if(el) el.classList.add("show"); }
+    function hideOk(id)       { const el=$(id); if(el) el.classList.remove("show"); }
+
+    function cleanPhone(v) {
+      return (v||"").toString().trim().replace(/[\s\-\+]/g,"");
+    }
+    function validContact(v) { return /^\d{10}$/.test(cleanPhone(v)); }
+
+    function openModal(id)  { const m=$(id); if(m){ m.classList.add("active"); } }
+    function closeModal(id) { const m=$(id); if(m){ m.classList.remove("active"); } }
+
+    // Close on backdrop click
+    ["loginModal","signupModal","editModal"].forEach(id => {
+      const m=$(id);
+      if(m) m.addEventListener("click", e => { if(e.target===m) closeModal(id); });
+    });
+
+    // ── Update auth UI ────────────────────────────────────
+    function setAuthUI(user) {
+      currentUser = user;
+      if (user) {
+        $("auth-logged-out").style.display = "none";
+        $("auth-logged-in").style.display  = "flex";
+        $("auth-welcome").style.display    = "block";
+        $("auth-username").textContent     = user.name || user.phone;
+      } else {
+        $("auth-logged-out").style.display = "flex";
+        $("auth-logged-in").style.display  = "none";
+        $("auth-welcome").style.display    = "none";
+      }
+    }
+
+    // ── Check server session on load ──────────────────────
+    async function checkSession() {
+      try {
+        const r = await fetch("/api/me");
+        const d = await r.json();
+        setAuthUI(d.logged_in ? d.user : null);
+      } catch(_) { setAuthUI(null); }
+    }
+
+    // ── Login ─────────────────────────────────────────────
+    $("btn-open-login").addEventListener("click", () => {
+      hideErr("login-err"); openModal("loginModal");
+    });
+    $("btn-login-cancel").addEventListener("click", () => closeModal("loginModal"));
+    $("switch-to-signup").addEventListener("click", () => { closeModal("loginModal"); openModal("signupModal"); });
+
+    $("btn-login-submit").addEventListener("click", async () => {
+      hideErr("login-err");
+      const phone    = $("login-phone").value.trim();
+      const password = $("login-password").value;
+      if (!phone || !password) { showErr("login-err","Phone and password are required."); return; }
+      try {
+        const r = await fetch("/api/login", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({phone, password})
+        });
+        const d = await r.json();
+        if (!r.ok) { showErr("login-err", d.error||"Login failed."); return; }
+        setAuthUI(d.user);
+        closeModal("loginModal");
+        $("login-phone").value = $("login-password").value = "";
+      } catch(_) { showErr("login-err","Network error. Please try again."); }
+    });
+
+    // ── Signup ────────────────────────────────────────────
+    $("btn-open-signup").addEventListener("click", () => {
+      hideErr("signup-err"); openModal("signupModal");
+    });
+    $("btn-signup-cancel").addEventListener("click", () => closeModal("signupModal"));
+    $("switch-to-login").addEventListener("click", () => { closeModal("signupModal"); openModal("loginModal"); });
+
+    $("btn-signup-submit").addEventListener("click", async () => {
+      hideErr("signup-err");
+      const name     = $("signup-name").value.trim();
+      const phone    = $("signup-phone").value.trim();
+      const email    = $("signup-email").value.trim();
+      const password = $("signup-password").value;
+      const c1 = $("signup-c1").value.trim();
+      const c2 = $("signup-c2").value.trim();
+      const c3 = $("signup-c3").value.trim();
+      if (!name)     { showErr("signup-err","Full name is required."); return; }
+      if (!phone)    { showErr("signup-err","Phone number is required."); return; }
+      if (!password) { showErr("signup-err","Password is required (min 6 chars)."); return; }
+      if (!validContact(c1)) { showErr("signup-err","At least one valid 10-digit emergency contact is required."); return; }
+      try {
+        const r = await fetch("/api/signup", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({name, phone, email:email||null, password, contact1:c1, contact2:c2, contact3:c3})
+        });
+        const d = await r.json();
+        if (!r.ok) { showErr("signup-err", d.error||"Signup failed."); return; }
+        setAuthUI(d.user);
+        closeModal("signupModal");
+        ["signup-name","signup-phone","signup-email","signup-password","signup-c1","signup-c2","signup-c3"]
+          .forEach(id => $(id).value="");
+      } catch(_) { showErr("signup-err","Network error. Please try again."); }
+    });
+
+    // ── Logout ────────────────────────────────────────────
+    $("btn-logout").addEventListener("click", async () => {
+      try { await fetch("/api/logout",{method:"POST"}); } catch(_){}
+      setAuthUI(null);
+    });
+
+    // ── Edit Profile ──────────────────────────────────────
+    $("btn-edit-profile").addEventListener("click", () => {
+      hideErr("edit-err"); hideOk("edit-ok");
+      if (currentUser) {
+        $("edit-name").value    = currentUser.name     || "";
+        $("edit-email").value   = currentUser.email    || "";
+        $("edit-c1").value      = currentUser.contact1 || "";
+        $("edit-c2").value      = currentUser.contact2 || "";
+        $("edit-c3").value      = currentUser.contact3 || "";
+        $("edit-curr-pw").value = "";
+        $("edit-new-pw").value  = "";
+      }
+      openModal("editModal");
+    });
+    $("btn-edit-cancel").addEventListener("click", () => closeModal("editModal"));
+
+    $("btn-edit-save").addEventListener("click", async () => {
+      hideErr("edit-err"); hideOk("edit-ok");
+      const payload = {
+        name:             $("edit-name").value.trim()    || undefined,
+        email:            $("edit-email").value.trim()   || undefined,
+        contact1:         $("edit-c1").value.trim(),
+        contact2:         $("edit-c2").value.trim(),
+        contact3:         $("edit-c3").value.trim(),
+        current_password: $("edit-curr-pw").value || undefined,
+        new_password:     $("edit-new-pw").value  || undefined,
+      };
+      try {
+        const r = await fetch("/api/edit_profile",{
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify(payload)
+        });
+        const d = await r.json();
+        if (!r.ok) { showErr("edit-err", d.error||"Update failed."); return; }
+        setAuthUI(d.user);
+        showOk("edit-ok");
+        setTimeout(() => closeModal("editModal"), 1400);
+      } catch(_) { showErr("edit-err","Network error. Please try again."); }
+    });
+
+    // ── SOS — opens login if not signed in ───────────────
+    const sosBtn = $("sosBtn");
+    if (sosBtn) {
+      let sirenAudio=null, sosLocked=false;
+      const flash=document.createElement("div");
+      flash.style.cssText="position:fixed;inset:0;background:rgba(255,0,0,0.2);pointer-events:none;z-index:9999;display:none;";
+      document.body.appendChild(flash);
+
+      function startAlarm(){
+  flash.style.display="block";
+  setTimeout(()=>{ flash.style.display="none"; },3000);
+}
+
+      function sendSosOnce(lat,lng,profile,contacts){
+        fetch("/api/sos_alert",{
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({
+            name:profile.name, phone:profile.phone,
+            contacts, lat, lng,
+            map_link:`https://maps.google.com/?q=${lat},${lng}`,
+            time:new Date().toISOString()
+          })
+        })
+        .then(r=>r.json())
+        .then(d=>{ alert(`🚨 Emergency alert sent to ${contacts.length} contact(s)!`); })
+        .catch(()=>{ alert("🚨 SOS triggered but failed to reach server."); });
+      }
+
+      sosBtn.addEventListener("click", async function(){
+        if (sosLocked) return;
+
+        // ── If NOT logged in → open login modal and stop ──
+        if (!currentUser) {
+          hideErr("login-err");
+          openModal("loginModal");
+          // Show a hint inside the login modal
+          showErr("login-err","Please log in first to use the SOS feature.");
+          return;
+        }
+
+        // ── Logged in — proceed with SOS ──────────────────
+        const contacts = [currentUser.contact1, currentUser.contact2, currentUser.contact3].filter(Boolean);
+        if (!contacts.length) {
+          // No contacts set — open edit profile
+          alert("No emergency contacts found. Please add contacts in your profile.");
+          hideErr("edit-err"); hideOk("edit-ok");
+          $("edit-name").value    = currentUser.name     || "";
+          $("edit-email").value   = currentUser.email    || "";
+          $("edit-c1").value      = currentUser.contact1 || "";
+          $("edit-c2").value      = currentUser.contact2 || "";
+          $("edit-c3").value      = currentUser.contact3 || "";
+          $("edit-curr-pw").value = "";
+          $("edit-new-pw").value  = "";
+          openModal("editModal");
+          return;
+        }
+
+        sosLocked=true;
+        setTimeout(()=>{ sosLocked=false; },10000);
+        startAlarm();
+
+        navigator.geolocation.getCurrentPosition(
+          pos => sendSosOnce(pos.coords.latitude, pos.coords.longitude, currentUser, contacts),
+          err => {
+            if(err.code===1){ alert("Location permission denied."); sosLocked=false; return; }
+            navigator.geolocation.getCurrentPosition(
+              pos => sendSosOnce(pos.coords.latitude, pos.coords.longitude, currentUser, contacts),
+              ()=>{
+                const input=prompt("GPS unavailable. Enter location (e.g. 16.5062,80.6480):");
+                if(!input){ sosLocked=false; return; }
+                const m=input.trim().match(/^([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)$/);
+                if(m) sendSosOnce(parseFloat(m[1]),parseFloat(m[2]),currentUser,contacts);
+                else  sendSosOnce(16.5062,80.6480,currentUser,contacts);
+              },
+              {enableHighAccuracy:false,timeout:20000,maximumAge:60000}
+            );
+          },
+          {enableHighAccuracy:true,timeout:15000,maximumAge:0}
+        );
+      });
+    }
+
+    // ── Boot ──────────────────────────────────────────────
+    checkSession();
+
+  })();
+  </script>
 </body>
 </html>
