@@ -49,32 +49,20 @@ db = SQLAlchemy()
 
 
 def _build_db_uri():
-    db_host = os.getenv("DB_HOST")
-    db_user = os.getenv("DB_USER")
-    db_pass = os.getenv("DB_PASSWORD")
-    db_name = os.getenv("DB_NAME")
-    db_port = os.getenv("DB_PORT", "20477")
-    if db_host and db_user and db_pass and db_name:
-        try:
-            import pymysql
-            encoded_pass = urllib.parse.quote_plus(db_pass)
-            return (
-                f"mysql+pymysql://{db_user}:{encoded_pass}"
-                f"@{db_host}:{db_port}/{db_name}"
-                f"?charset=utf8mb4"
-                f"&ssl_ca=/etc/ssl/certs/ca-certificates.crt"
-                f"&ssl_check_hostname=false"
-                f"&ssl_verify_cert=false"
-            )
-        except ImportError:
-            pass
+    # Render PostgreSQL (production)
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        # Render gives postgres:// but SQLAlchemy needs postgresql://
+        if database_url.startswith("postgres://"):
+            database_url = database_url.replace("postgres://", "postgresql://", 1)
+        return database_url
+    # Local MySQL (development)
     try:
         import pymysql
         return "mysql+pymysql://root:Qazqaz12%23@localhost/saferoute"
     except ImportError:
         pass
     return f"sqlite:///{BASE_DIR / 'saferoute.db'}"
-
 
 
 # ══════════════════════════════════════════════════════════════
