@@ -148,17 +148,58 @@
   }
 
   function detectLiveLocation(){
-    if(!navigator.geolocation){setStatus("Geolocation not supported.");return;}
+    if(!navigator.geolocation){setStatus("Geolocation not supported. Enter location manually.");return;}
     if(state.watchId!==null){try{navigator.geolocation.clearWatch(state.watchId);}catch(_){}state.watchId=null;}
-    state.watchId=navigator.geolocation.watchPosition(
-      pos=>{
-        const{latitude:lat,longitude:lng}=pos.coords;
-        if(!state.start||state.start.label==="Current Location"){state.start={lat,lng,label:"Current Location"};ui.inputStart.value="Current Location";setStartMarker([lat,lng],"Start: Current Location");}
-        if(state.navigating&&state.nav.active)updateNavigation(lat,lng,pos.coords.speed);
-      },
-      ()=>{setStatus("Location permission denied. You can still search manually.");document.dispatchEvent(new CustomEvent("sp:locationDenied"));},
-      {enableHighAccuracy:true,timeout:12000,maximumAge:1000}
-    );
+
+    function onSuccess(pos){
+      const{latitude:lat,longitude:lng}=pos.coords;
+      if(!state.start||state.start.label==="Current Location"){
+        state.start={lat,lng,label:"Current Location"};
+        ui.inputStart.value="Current Location";
+        setStartMarker([lat,lng],"Start: Current Location");
+        const mobInp=document.getElementById("mob-input-start");
+        if(mobInp)mobInp.value="Current Location";
+      }
+      if(state.navigating&&state.nav.active)updateNavigation(lat,lng,pos.coords.speed);
+    }
+
+    function onError(err){
+      // err.code: 1=PERMISSION_DENIED, 2=POSITION_UNAVAILABLE, 3=TIMEOUT
+      if(err.code===1){
+        // Only show popup for actual permission denial
+        setStatus("Location permission denied. Enter location manually.");
+        document.dispatchEvent(new CustomEvent("sp:locationDenied"));
+      } else if(err.code===3){
+        // Timeout — try again with low accuracy fallback, don't show popup
+        setStatus("Getting location…");
+        navigator.geolocation.getCurrentPosition(onSuccess, onErrorFallback,
+          {enableHighAccuracy:false,timeout:15000,maximumAge:60000});
+      } else {
+        // Position unavailable (err.code===2) — try low accuracy silently
+        navigator.geolocation.getCurrentPosition(onSuccess, onErrorFallback,
+          {enableHighAccuracy:false,timeout:15000,maximumAge:60000});
+      }
+    }
+
+    function onErrorFallback(err){
+      if(err.code===1){
+        setStatus("Location permission denied. Enter location manually.");
+        document.dispatchEvent(new CustomEvent("sp:locationDenied"));
+      } else {
+        // Not denied — just unavailable. Don't show popup, let user type manually.
+        setStatus("Location unavailable. Enter start location manually.");
+      }
+    }
+
+    // First do a one-shot getCurrentPosition so we get a result faster
+    navigator.geolocation.getCurrentPosition(onSuccess, onError,
+      {enableHighAccuracy:true, timeout:10000, maximumAge:5000});
+
+    // Then start watchPosition for live tracking during navigation
+    state.watchId=navigator.geolocation.watchPosition(onSuccess, err=>{
+      // Suppress watch errors silently — getCurrentPosition already handled it
+      if(err.code===1)document.dispatchEvent(new CustomEvent("sp:locationDenied"));
+    }, {enableHighAccuracy:true,timeout:20000,maximumAge:3000});
   }
 
   let startAbort=null,endAbort=null;

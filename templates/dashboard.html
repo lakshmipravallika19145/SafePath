@@ -570,25 +570,35 @@
 
     /* ── Location popup ─────────────────────────────────── */
     const locPopup = $("location-popup");
-    function showLocPopup() { locPopup.classList.add("active"); }
-    function hideLocPopup() { locPopup.classList.remove("active"); }
+    let locPopupShown = false;
+    function showLocPopup() {
+      if (locPopupShown) return; // don't show twice
+      locPopupShown = true;
+      locPopup.classList.add("active");
+    }
+    function hideLocPopup() {
+      locPopup.classList.remove("active");
+    }
 
     $("loc-retry-btn").addEventListener("click", () => {
       hideLocPopup();
+      locPopupShown = false;
       navigator.geolocation.getCurrentPosition(
         pos => {
-          // success — update the app state via a custom event
           document.dispatchEvent(new CustomEvent("sp:locationGranted", {
             detail: { lat: pos.coords.latitude, lng: pos.coords.longitude }
           }));
         },
-        () => showLocPopup(),
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        err => {
+          if (err.code === 1) showLocPopup(); // only re-show if still denied
+          // timeout/unavailable — just let them type manually, no popup
+        },
+        { enableHighAccuracy: false, timeout: 12000, maximumAge: 30000 }
       );
     });
-    $("loc-skip-btn").addEventListener("click", hideLocPopup);
+    $("loc-skip-btn").addEventListener("click", () => { hideLocPopup(); locPopupShown = true; });
 
-    // Show popup if geolocation denied
+    // Only show popup for actual PERMISSION_DENIED (fired from app.js with err.code===1)
     document.addEventListener("sp:locationDenied", showLocPopup);
 
     /* ── Mobile status mirror ────────────────────────────── */
