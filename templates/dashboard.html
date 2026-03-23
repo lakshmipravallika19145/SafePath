@@ -409,12 +409,372 @@
     </div>
   </div>
 
+  <!-- ══════════════════════════════════════════════════════
+       LOCATION PERMISSION POPUP (mobile)
+  ══════════════════════════════════════════════════════════ --></p>
+  <div id="location-popup">
+    <div class="loc-box">
+      <div class="loc-box__icon">📍</div>
+      <div class="loc-box__title">Enable Live Location</div>
+      <div class="loc-box__sub">SafePath needs your location to find safe routes and navigate you in real time.</div>
+      <div class="loc-box__steps">
+        <div class="loc-step"><div class="loc-step__num">1</div><span>Tap <b>Allow</b> when your browser asks for location access</span></div>
+        <div class="loc-step"><div class="loc-step__num">2</div><span>If blocked: open browser <b>Settings → Site Settings → Location</b> and allow safepath</span></div>
+        <div class="loc-step"><div class="loc-step__num">3</div><span>On iPhone: <b>Settings → Safari → Location → Allow</b></span></div>
+      </div>
+      <button class="loc-box__retry" id="loc-retry-btn">🔄 Try Again</button>
+      <button class="loc-box__skip" id="loc-skip-btn">Skip — I'll enter location manually</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       MOBILE BOTTOM SHEET
+  ══════════════════════════════════════════════════════════ --></p>
+  <div id="mobile-sheet" class="sheet--collapsed">
+    <!-- Drag handle -->
+    <div class="sheet__handle-wrap" id="sheet-handle">
+      <div class="sheet__handle"></div>
+      <div class="sheet__handle-label">Swipe up for controls</div>
+    </div>
+
+    <!-- Peek bar (visible when collapsed) -->
+    <div class="sheet__peek">
+      <div class="sheet__peek-dest" id="mob-peek-dest">
+        <span>Where do you want to go?</span>
+      </div>
+      <div class="sheet__peek-score" id="mob-peek-score"></div>
+    </div>
+
+    <!-- Scrollable content -->
+    <div class="sheet__content">
+
+      <!-- Search inputs -->
+      <div class="sheet__search">
+        <div class="sheet__input-wrap" id="mob-start-wrap" style="position:relative">
+          <span class="sheet__input-icon">🔵</span>
+          <input id="mob-input-start" placeholder="Your location" autocomplete="off" style="font-size:16px" />
+          <div id="mob-suggest-start" class="sheet__suggest suggest"></div>
+        </div>
+        <div class="sheet__input-divider"></div>
+        <div class="sheet__input-wrap" id="mob-dest-wrap" style="position:relative">
+          <span class="sheet__input-icon">🔴</span>
+          <input id="mob-input-dest" placeholder="Where to?" autocomplete="off" style="font-size:16px" />
+          <div id="mob-suggest-dest" class="sheet__suggest suggest"></div>
+        </div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="sheet__actions">
+        <button id="mob-btn-find" class="btn btn--primary">🛡️ Find Safe Routes</button>
+        <button id="mob-btn-reset" class="btn btn--ghost">↺ Reset</button>
+      </div>
+
+      <!-- Nav + SOS row -->
+      <div class="sheet__nav-row">
+        <button id="mob-btn-nav" class="btn btn--start">▶ Start Navigation</button>
+        <button id="mob-btn-sos" class="btn btn--danger sheet__sos">🚨</button>
+      </div>
+
+      <!-- Route cards -->
+      <div id="mob-routes-section" style="display:none">
+        <div class="sheet__routes-label">Routes Found</div>
+        <div id="mob-route-scroll" class="sheet__route-scroll"></div>
+      </div>
+
+      <!-- Safety filters accordion -->
+      <div>
+        <div class="sheet__filters-toggle" id="mob-filters-toggle">
+          <span>⚙️ Safety Filters</span>
+          <span>▼</span>
+        </div>
+        <div class="sheet__filters-body" id="mob-filters-body">
+          <label class="toggle"><span class="toggle__text">Street Lighting</span><input id="mob-t-light"  type="checkbox" checked /><span class="toggle__ui"></span></label>
+          <label class="toggle"><span class="toggle__text">Crowd Density</span>  <input id="mob-t-crowd"  type="checkbox" checked /><span class="toggle__ui"></span></label>
+          <label class="toggle"><span class="toggle__text">Police Patrol</span>  <input id="mob-t-police" type="checkbox" checked /><span class="toggle__ui"></span></label>
+          <label class="toggle"><span class="toggle__text">Crime Reports</span>  <input id="mob-t-crime"  type="checkbox" checked /><span class="toggle__ui"></span></label>
+          <label class="toggle"><span class="toggle__text">CCTV Coverage</span>  <input id="mob-t-cctv"   type="checkbox" checked /><span class="toggle__ui"></span></label>
+        </div>
+      </div>
+
+      <!-- Status message on mobile -->
+      <div id="mob-status" style="font-size:12px;color:var(--muted2);text-align:center;padding:4px 0;"></div>
+
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       MOBILE NAV BAR (shown during navigation)
+  ══════════════════════════════════════════════════════════ --></p>
+  <div id="mobile-nav-bar">
+    <div class="mnb__stats">
+      <div class="mnb__stat"><div class="mnb__val" id="mnb-remaining">—</div><div class="mnb__lbl">Distance</div></div>
+      <div class="mnb__stat"><div class="mnb__val" id="mnb-eta">—</div><div class="mnb__lbl">Arrival</div></div>
+      <div class="mnb__stat"><div class="mnb__val" id="mnb-speed">—</div><div class="mnb__lbl">Speed</div></div>
+      <div class="mnb__stat"><div class="mnb__val" id="mnb-safety">—</div><div class="mnb__lbl">Safety</div></div>
+    </div>
+    <button class="mnb__stop" id="mnb-stop-btn">■ Stop Navigation</button>
+  </div>
+
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 
   <!-- ══════════════════════════════════════════════════════
-       Auth + SOS JS  —  no localStorage, no popup on load
-  ══════════════════════════════════════════════════════════ -->
+       MOBILE SHEET + LOCATION POPUP JS
+  ══════════════════════════════════════════════════════════ --></p>
+  <script>
+  (function(){
+    const isMobile = () => window.innerWidth <= 760;
+    if (!isMobile()) return; // desktop: do nothing
+
+    const $ = id => document.getElementById(id);
+
+    /* ── Sheet drag/tap to expand/collapse ──────────────── */
+    const sheet  = $("mobile-sheet");
+    const handle = $("sheet-handle");
+    let sheetOpen = false;
+
+    function openSheet()  { sheet.classList.remove("sheet--collapsed"); sheet.classList.add("sheet--expanded");  sheetOpen=true; }
+    function closeSheet() { sheet.classList.add("sheet--collapsed");    sheet.classList.remove("sheet--expanded"); sheetOpen=false; }
+
+    handle.addEventListener("click", () => sheetOpen ? closeSheet() : openSheet());
+
+    // swipe up/down
+    let touchY0 = null;
+    sheet.addEventListener("touchstart", e => { touchY0 = e.touches[0].clientY; }, {passive:true});
+    sheet.addEventListener("touchend",   e => {
+      if (touchY0 === null) return;
+      const dy = touchY0 - e.changedTouches[0].clientY;
+      if (dy > 40)  openSheet();
+      if (dy < -40) closeSheet();
+      touchY0 = null;
+    }, {passive:true});
+
+    // open sheet when user taps search inputs
+    $("mob-input-start").addEventListener("focus", openSheet);
+    $("mob-input-dest").addEventListener("focus",  openSheet);
+
+    /* ── Filters accordion ──────────────────────────────── */
+    $("mob-filters-toggle").addEventListener("click", () => {
+      const body = $("mob-filters-body");
+      const toggle = $("mob-filters-toggle");
+      body.classList.toggle("open");
+      toggle.classList.toggle("open");
+    });
+
+    /* ── Mirror desktop filter toggles → mobile ─────────── */
+    ["light","crowd","police","crime","cctv"].forEach(k => {
+      const desk = $("t-"+k), mob = $("mob-t-"+k);
+      if (!desk || !mob) return;
+      mob.addEventListener("change", () => { desk.checked = mob.checked; });
+    });
+
+    /* ── Location popup ─────────────────────────────────── */
+    const locPopup = $("location-popup");
+    function showLocPopup() { locPopup.classList.add("active"); }
+    function hideLocPopup() { locPopup.classList.remove("active"); }
+
+    $("loc-retry-btn").addEventListener("click", () => {
+      hideLocPopup();
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          // success — update the app state via a custom event
+          document.dispatchEvent(new CustomEvent("sp:locationGranted", {
+            detail: { lat: pos.coords.latitude, lng: pos.coords.longitude }
+          }));
+        },
+        () => showLocPopup(),
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    });
+    $("loc-skip-btn").addEventListener("click", hideLocPopup);
+
+    // Show popup if geolocation denied
+    document.addEventListener("sp:locationDenied", showLocPopup);
+
+    /* ── Mobile status mirror ────────────────────────────── */
+    const desktopStatus = $("status");
+    const mobStatus     = $("mob-status");
+    if (desktopStatus && mobStatus) {
+      const obs = new MutationObserver(() => {
+        mobStatus.textContent = desktopStatus.textContent;
+      });
+      obs.observe(desktopStatus, { childList:true, subtree:true, characterData:true });
+    }
+
+    /* ── Wire mobile search inputs to app.js state ───────── */
+    // app.js exposes ui.inputStart / ui.inputEnd — we mirror mobile inputs
+    function syncToDesktop(mobInput, deskInput, sugMob, sugDesk) {
+      // keep desktop input in sync (app.js listens to desktop inputs)
+      mobInput.addEventListener("input", () => {
+        deskInput.value = mobInput.value;
+        deskInput.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      // mirror suggestions from desktop suggest div to mobile
+      const obs = new MutationObserver(() => {
+        sugMob.innerHTML = sugDesk.innerHTML;
+        if (sugDesk.classList.contains("suggest--open")) {
+          sugMob.classList.add("suggest--open");
+        } else {
+          sugMob.classList.remove("suggest--open");
+        }
+        // rewire click events on cloned buttons
+        sugMob.querySelectorAll(".suggest__item").forEach((btn, i) => {
+          const orig = sugDesk.querySelectorAll(".suggest__item")[i];
+          if (orig) btn.addEventListener("click", () => orig.click());
+        });
+      });
+      obs.observe(sugDesk, { childList: true, attributes: true, attributeFilter: ["class"] });
+    }
+
+    syncToDesktop(
+      $("mob-input-start"), $("input-current"),
+      $("mob-suggest-start"), $("suggest-current")
+    );
+    syncToDesktop(
+      $("mob-input-dest"), $("input-dest"),
+      $("mob-suggest-dest"), $("suggest-dest")
+    );
+
+    /* ── Mobile Find Routes button ───────────────────────── */
+    $("mob-btn-find").addEventListener("click", () => {
+      closeSheet();
+      $("btn-find").click();
+    });
+
+    /* ── Mobile Reset button ─────────────────────────────── */
+    $("mob-btn-reset").addEventListener("click", () => {
+      $("mob-input-start").value = "";
+      $("mob-input-dest").value  = "";
+      $("mob-peek-dest").innerHTML = "<span>Where do you want to go?</span>";
+      $("mob-peek-score").textContent = "";
+      $("mob-routes-section").style.display = "none";
+      $("btn-reset").click();
+    });
+
+    /* ── Mobile Nav button ───────────────────────────────── */
+    $("mob-btn-nav").addEventListener("click", () => {
+      closeSheet();
+      $("btn-start-nav").click();
+    });
+
+    /* ── Mobile SOS ──────────────────────────────────────── */
+    $("mob-btn-sos").addEventListener("click", () => {
+      $("sosBtn").click();
+    });
+
+    /* ── Sync stop nav ───────────────────────────────────── */
+    $("mnb-stop-btn").addEventListener("click", () => {
+      $("nav-stop-btn").click();
+    });
+
+    /* ── Mirror route cards to mobile horizontal scroll ──── */
+    const desktopCards = $("route-cards");
+    const mobScroll    = $("mob-route-scroll");
+    const mobSection   = $("mob-routes-section");
+
+    function routeColor(k) {
+      return k==="Safest Route"?"#20e37f":k==="Balanced Route"?"#e3b62f":k==="Fastest Route"?"#e33456":"#20e37f";
+    }
+    function routeIcon(k) {
+      return k==="Safest Route"?"🛡️":k==="Balanced Route"?"⚖️":k==="Fastest Route"?"⚡":"📍";
+    }
+    function fmtKm(m) { return (m/1000).toFixed(1)+" km"; }
+    function fmtMin(s){ return Math.max(1,Math.round(s/60))+" min"; }
+
+    const cardsObs = new MutationObserver(() => {
+      const cards = desktopCards.querySelectorAll(".card--route");
+      if (!cards.length) return;
+      mobScroll.innerHTML = "";
+      cards.forEach(card => {
+        const key   = card.dataset.routeKey || "Route";
+        const title = card.querySelector(".card__title")?.textContent || key;
+        const pills = [...card.querySelectorAll(".pill")].map(p => p.textContent);
+        const barW  = card.querySelector(".bar__fill")?.style.width || "0%";
+        const badge = card.querySelector(".chip-badge")?.textContent || "";
+        const rc    = routeColor(key);
+
+        const mc = document.createElement("div");
+        mc.className = "sheet__route-card" + (card.classList.contains("card--selected") ? " selected" : "");
+        mc.dataset.routeKey = key;
+        mc.style.setProperty("--route-color", rc);
+        mc.innerHTML = `
+          <div style="font-size:12px;font-weight:800;margin-bottom:6px">${routeIcon(key)} ${title}</div>
+          <div style="height:6px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden;margin-bottom:8px">
+            <div style="height:100%;width:${barW};background:${rc};border-radius:99px"></div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${pills.slice(0,3).map(p=>`<span style="font-size:10px;padding:3px 7px;border-radius:99px;background:rgba(255,255,255,0.06);color:var(--muted)">${p}</span>`).join("")}
+          </div>
+          ${badge?`<div style="margin-top:6px;font-size:10px;font-weight:700;color:${rc}">${badge}</div>`:""}
+        `;
+        mc.addEventListener("click", () => {
+          // find and click the matching desktop card
+          desktopCards.querySelectorAll(".card--route").forEach(c => {
+            if ((c.dataset.routeKey||"") === key) c.click();
+          });
+          // update selected state in mobile
+          mobScroll.querySelectorAll(".sheet__route-card").forEach(c =>
+            c.classList.toggle("selected", c.dataset.routeKey === key)
+          );
+          // update peek bar
+          updatePeekBar();
+        });
+        mobScroll.appendChild(mc);
+      });
+      mobSection.style.display = "block";
+      updatePeekBar();
+      openSheet();
+    });
+    cardsObs.observe(desktopCards, { childList: true, subtree: true });
+
+    function updatePeekBar() {
+      const destVal = $("mob-input-dest").value || $("input-dest").value || "";
+      const score   = $("bn-score")?.textContent || "";
+      if (destVal) {
+        $("mob-peek-dest").textContent = "→ " + destVal;
+      }
+      if (score && score !== "—") $("mob-peek-score").textContent = score;
+    }
+
+    /* ── Mirror navigation state to mobile nav bar ────────── */
+    const navBanner = $("nav-banner");
+    const mobileNavBar = $("mobile-nav-bar");
+    const navObs = new MutationObserver(() => {
+      if (navBanner.classList.contains("active")) {
+        mobileNavBar.classList.add("active");
+        sheet.style.display = "none";
+      } else {
+        mobileNavBar.classList.remove("active");
+        sheet.style.display = "";
+      }
+    });
+    navObs.observe(navBanner, { attributes: true, attributeFilter: ["class"] });
+
+    // mirror nav stats
+    function mirrorNavStats() {
+      const rem  = $("nav-remaining")?.textContent;
+      const eta  = $("nav-eta")?.textContent;
+      const spd  = $("nav-speed")?.textContent;
+      const safe = $("nav-safety")?.textContent;
+      if (rem)  $("mnb-remaining").textContent = rem;
+      if (eta)  $("mnb-eta").textContent = eta;
+      if (spd)  $("mnb-speed").textContent = spd;
+      if (safe) $("mnb-safety").textContent = safe;
+    }
+    setInterval(mirrorNavStats, 1000);
+
+    /* ── Mirror mob-btn-nav text with btn-start-nav ─────── */
+    const desktopNavBtn = $("btn-start-nav");
+    const mobNavBtn     = $("mob-btn-nav");
+    const navBtnObs = new MutationObserver(() => {
+      mobNavBtn.textContent = desktopNavBtn.textContent.includes("Stop")
+        ? "■ Stop Navigation"
+        : "▶ Start Navigation";
+    });
+    navBtnObs.observe(desktopNavBtn, { childList: true });
+
+  })();
+  </script>
   <script>
   (function () {
     let currentUser = null;

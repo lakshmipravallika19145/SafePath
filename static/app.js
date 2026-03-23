@@ -101,6 +101,16 @@
   map.on("load",()=>{
     // Session check is handled by the auth script in dashboard.html (server-side /api/me)
     // No localStorage needed here
+    // Handle location granted from mobile popup
+    document.addEventListener("sp:locationGranted", e => {
+      const {lat, lng} = e.detail;
+      state.start = {lat, lng, label:"Current Location"};
+      const inp = document.getElementById("input-current");
+      if (inp) inp.value = "Current Location";
+      const mobInp = document.getElementById("mob-input-start");
+      if (mobInp) mobInp.value = "Current Location";
+      setStartMarker([lat, lng], "Start: Current Location");
+    });
 
     map.on("click",e=>{
       state.lastClick={lat:e.lngLat.lat,lng:e.lngLat.lng};
@@ -146,7 +156,7 @@
         if(!state.start||state.start.label==="Current Location"){state.start={lat,lng,label:"Current Location"};ui.inputStart.value="Current Location";setStartMarker([lat,lng],"Start: Current Location");}
         if(state.navigating&&state.nav.active)updateNavigation(lat,lng,pos.coords.speed);
       },
-      ()=>setStatus("Location permission denied. You can still search manually."),
+      ()=>{setStatus("Location permission denied. You can still search manually.");document.dispatchEvent(new CustomEvent("sp:locationDenied"));},
       {enableHighAccuracy:true,timeout:12000,maximumAge:1000}
     );
   }
