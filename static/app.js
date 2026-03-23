@@ -49,13 +49,16 @@
   let lastNavPos=null,lastNavTime=null;
   function setStatus(msg){ui.status.textContent=msg;}
 
-  /* Map */
+  /* ── FIX 3: Map with maxBounds to prevent world-wrap duplication ── */
   const map=new maplibregl.Map({
     container:"map",
     style:{version:8,glyphs:"https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
       sources:{osm:{type:"raster",tiles:["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],tileSize:256,attribution:"© OpenStreetMap contributors"}},
       layers:[{id:"osm-tiles",type:"raster",source:"osm"}]},
     center:[80.6480,16.5062],zoom:13,
+    /* FIX 3: Clamp to one world copy — prevents double-world on distant routes */
+    maxBounds:[[-185,-85],[185,85]],
+    renderWorldCopies:false,
   });
   map.addControl(new maplibregl.NavigationControl({showCompass:true}),"bottom-right");
 
@@ -63,6 +66,34 @@
   let routeSrcIds=[],routeLyrIds=[],arrowLyr="route-arrows";
   const hmSrc="safety-heatmap",hmLyr="safety-heatmap-layer";
   const spSrc="safety-points",spClust="safety-clusters",spPts="safety-points-layer",spCnt="safety-cluster-count";
+
+  /* ── FIX 4: Smooth marker animation using requestAnimationFrame ── */
+  let _navDotAnimFrame=null;
+  let _navDotCurrent=null; // {lng, lat}
+
+  function animateNavDotTo(targetLng,targetLat){
+    if(!navDot) return;
+    if(!_navDotCurrent){
+      _navDotCurrent={lng:targetLng,lat:targetLat};
+      navDot.setLngLat([targetLng,targetLat]);
+      return;
+    }
+    if(_navDotAnimFrame) cancelAnimationFrame(_navDotAnimFrame);
+    const startLng=_navDotCurrent.lng, startLat=_navDotCurrent.lat;
+    const startTime=performance.now();
+    const DURATION=900; // ms — smooth but not laggy
+
+    function step(now){
+      const t=Math.min((now-startTime)/DURATION,1);
+      const e=t<0.5?2*t*t:-1+(4-2*t)*t; // ease-in-out
+      const lng=startLng+(targetLng-startLng)*e;
+      const lat=startLat+(targetLat-startLat)*e;
+      navDot.setLngLat([lng,lat]);
+      _navDotCurrent={lng,lat};
+      if(t<1) _navDotAnimFrame=requestAnimationFrame(step);
+    }
+    _navDotAnimFrame=requestAnimationFrame(step);
+  }
 
   function createNavDotEl(){
     const wrap=document.createElement("div");wrap.style.cssText="position:relative;width:22px;height:22px;";
@@ -96,12 +127,25 @@
     const el=document.createElement("div");Object.assign(el.style,{width:"18px",height:"18px",borderRadius:"50%",backgroundColor:"#ff4d6d",border:"3px solid #fff",boxShadow:"0 2px 6px rgba(0,0,0,0.4)"});
     endMarker=new maplibregl.Marker({element:el}).setLngLat(Array.isArray(ll)?[ll[1],ll[0]]:[ll.lng,ll.lat]).setPopup(new maplibregl.Popup({offset:15}).setHTML(label||"Destination")).addTo(map);
   }
-  function fitToStartEnd(){if(!state.start||!state.end)return;map.fitBounds([[state.start.lng,state.start.lat],[state.end.lng,state.end.lat]],{padding:80,duration:400});}
+
+  /* ── FIX 3: fitToStartEnd clamps zoom so map never shows world-wrap ── */
+  function fitToStartEnd(){
+    if(!state.start||!state.end)return;
+    const s=[state.start.lng,state.start.lat];
+    const e=[state.end.lng,state.end.lat];
+    // Clamp coordinates to valid range to prevent world-wrap
+    const minLng=Math.max(-179,Math.min(s[0],e[0]));
+    const maxLng=Math.min(179, Math.max(s[0],e[0]));
+    const minLat=Math.max(-85, Math.min(s[1],e[1]));
+    const maxLat=Math.min(85,  Math.max(s[1],e[1]));
+    map.fitBounds([[minLng,minLat],[maxLng,maxLat]],{
+      padding:80,
+      duration:400,
+      maxZoom:16,  // never zoom in too tight
+    });
+  }
 
   map.on("load",()=>{
-    // Session check is handled by the auth script in dashboard.html (server-side /api/me)
-    // No localStorage needed here
-    // Handle location granted from mobile popup
     document.addEventListener("sp:locationGranted", e => {
       const {lat, lng} = e.detail;
       state.start = {lat, lng, label:"Current Location"};
@@ -117,7 +161,7 @@
       if(!state.start){state.start={lat:e.lngLat.lat,lng:e.lngLat.lng,label:"Start (map click)"};ui.inputStart.value="Current Location (map click)";setStartMarker([e.lngLat.lat,e.lngLat.lng],"Start");}
       else if(!state.end){state.end={lat:e.lngLat.lat,lng:e.lngLat.lng,label:"Destination (map click)"};ui.inputEnd.value="Destination (map click)";setEndMarker([e.lngLat.lat,e.lngLat.lng],"Destination");fitToStartEnd();}
     });
-    (async function boot(){try{setStatus("Loading safety dataset…");await loadSafetyPoints();setStatus("Ready. Detecting live location…");detectLiveLocation();}catch(e){setStatus("Failed to initialize.");}})();
+    (async function boot(){try{setStatus("Loading safety dataset…");await loadSafetyPoints();setStatus("Ready. Detecting live location…");startGeoWatch();}catch(e){setStatus("Failed to initialize.");}})();
   });
 
   function safetyPctPt(p){
@@ -147,23 +191,76 @@
     map.addLayer({id:hmLyr,type:"heatmap",source:hmSrc,maxzoom:17,paint:{"heatmap-weight":["get","intensity"],"heatmap-intensity":1,"heatmap-color":["interpolate",["linear"],["heatmap-density"],0,"rgba(0,0,0,0)",0.2,"rgba(255,77,109,0.3)",0.5,"rgba(255,211,90,0.5)",0.8,"rgba(41,255,154,0.6)",1,"rgba(108,246,255,0.8)"],"heatmap-radius":28,"heatmap-opacity":state.heatEnabled?0.7:0}},spClust);
   }
 
-  function detectLiveLocation(){
-    if(!navigator.geolocation){setStatus("Geolocation not supported.");return;}
-    if(state.watchId!==null){try{navigator.geolocation.clearWatch(state.watchId);}catch(_){}state.watchId=null;}
+  /* ══════════════════════════════════════════════════════════
+     FIX 1 & 2: Single persistent geo watcher — never re-created
+     The key rules:
+     - startGeoWatch() is called ONCE on boot and ONCE on retry
+     - It is NEVER called again (not in detectLiveLocation loop)
+     - watchId is stored; clearWatch only called on explicit stop
+  ══════════════════════════════════════════════════════════ */
+  function startGeoWatch(){
+    if(!navigator.geolocation){
+      setStatus("Geolocation not supported.");
+      document.dispatchEvent(new CustomEvent("sp:locationDenied"));
+      return;
+    }
+    // If already watching, do nothing — this is the idempotency guard
+    if(state.watchId!==null) return;
+
     state.watchId=navigator.geolocation.watchPosition(
       pos=>{
         const{latitude:lat,longitude:lng}=pos.coords;
-        if(!state.start||state.start.label==="Current Location"){state.start={lat,lng,label:"Current Location"};ui.inputStart.value="Current Location";setStartMarker([lat,lng],"Start: Current Location");}
-        if(state.navigating&&state.nav.active)updateNavigation(lat,lng,pos.coords.speed);
+        // Update start marker only if not already set to a custom location
+        if(!state.start||state.start.label==="Current Location"){
+          state.start={lat,lng,label:"Current Location"};
+          ui.inputStart.value="Current Location";
+          setStartMarker([lat,lng],"Start: Current Location");
+        }
+        // Always update nav if active
+        if(state.navigating&&state.nav.active){
+          updateNavigation(lat,lng,pos.coords.speed);
+        }
+        // Dismiss the location permission popup on first successful fix
+        document.dispatchEvent(new CustomEvent("sp:locationGrantedInternal",{detail:{lat,lng}}));
       },
-      ()=>{setStatus("Location permission denied. You can still search manually.");document.dispatchEvent(new CustomEvent("sp:locationDenied"));},
-      {enableHighAccuracy:true,timeout:12000,maximumAge:1000}
+      err=>{
+        // Only show the popup for PERMISSION_DENIED — not for timeout/unavailable
+        if(err.code===1){
+          setStatus("Location permission denied. You can still search manually.");
+          document.dispatchEvent(new CustomEvent("sp:locationDenied"));
+        } else if(err.code===3){
+          setStatus("Location timeout — retrying…");
+          // Don't show popup, don't kill the watcher — it will retry automatically
+        } else {
+          setStatus("Location unavailable. Check your GPS.");
+        }
+      },
+      {enableHighAccuracy:true,timeout:15000,maximumAge:2000}
     );
   }
 
+  // Called by the "Try Again" button — clears the old watcher and starts fresh
+  function retryGeoWatch(){
+    if(state.watchId!==null){
+      try{navigator.geolocation.clearWatch(state.watchId);}catch(_){}
+      state.watchId=null;
+    }
+    startGeoWatch();
+  }
+  // Expose for use by the mobile popup script
+  window._spRetryGeoWatch=retryGeoWatch;
+
+  // Legacy alias kept so nothing else breaks
+  function detectLiveLocation(){ startGeoWatch(); }
+
+  // Hide the popup when we get a good position
+  document.addEventListener("sp:locationGrantedInternal",()=>{
+    const popup=document.getElementById("location-popup");
+    if(popup) popup.classList.remove("active");
+  });
+
   let startAbort=null,endAbort=null;
   async function fetchSuggestions(q,ctrl){
-    // Call Nominatim directly from browser (server-side calls get 403 blocked by Nominatim on cloud IPs)
     const params=new URLSearchParams({format:"json",q,limit:"8",addressdetails:"1",namedetails:"1",countrycodes:"in","accept-language":"en"});
     if(state.start?.lat){params.set("viewbox",`${state.start.lng-0.5},${state.start.lat+0.5},${state.start.lng+0.5},${state.start.lat-0.5}`);}
     const res=await fetch("https://nominatim.openstreetmap.org/search?"+params,{signal:ctrl.signal,headers:{"Accept-Language":"en"}});
@@ -332,18 +429,22 @@
     state.nav.active=picked;state.nav.coordsLatLng=coordsLatLng;state.nav.cumDistM=buildCumDist(coordsLatLng);
     state.nav.startedAtMs=Date.now();state.nav.lastRerouteAtMs=0;state.nav.traveledIdx=0;state.nav.arrivedFired=false;
     state.navigating=true;
+    _navDotCurrent=null; // reset smooth animation origin
     if(ui.navBanner)ui.navBanner.classList.add("active");
     if(ui.progressBar){ui.progressBar.style.display="block";ui.progressBar.style.width="0%";}
     $("btn-start-nav").textContent="Stop Navigation";
     if(coordsLatLng.length>0)map.easeTo({center:[coordsLatLng[0][1],coordsLatLng[0][0]],zoom:16,duration:800});
     ui.bnDest.textContent=state.end?(state.end.label||"Destination"):"—";
     setStatus("🧭 Navigation started — "+picked.key);
+    // Make sure geo watcher is running
+    startGeoWatch();
   }
 
   function stopNavigation(){
     state.navigating=false;state.nav.active=null;state.nav.coordsLatLng=[];state.nav.cumDistM=[];
     state.nav.startedAtMs=null;state.nav.lastRerouteAtMs=0;state.nav.traveledIdx=0;state.nav.arrivedFired=false;
-    lastNavPos=lastNavTime=null;
+    lastNavPos=lastNavTime=null;_navDotCurrent=null;
+    if(_navDotAnimFrame){cancelAnimationFrame(_navDotAnimFrame);_navDotAnimFrame=null;}
     if(ui.navBanner)ui.navBanner.classList.remove("active");
     if(ui.progressBar){ui.progressBar.style.display="none";ui.progressBar.style.width="0%";}
     $("btn-start-nav").textContent="Start Navigation";
@@ -360,11 +461,20 @@
     if(ui.progressBar)ui.progressBar.style.width="100%";
   }
 
+  /* ── FIX 2 & 4: updateNavigation — smooth dot, no map flicker ── */
   function updateNavigation(lat,lng,gpsSpeed){
     const nav=state.nav,active=nav.active;
     if(!active?.route||!nav.coordsLatLng.length)return;
-    if(!navDot){navDot=new maplibregl.Marker({element:createNavDotEl(),anchor:"center"}).setLngLat([lng,lat]).addTo(map);}
-    else{navDot.setLngLat([lng,lat]);}
+
+    // Create dot once; thereafter animate smoothly — NO map re-init
+    if(!navDot){
+      navDot=new maplibregl.Marker({element:createNavDotEl(),anchor:"center"}).setLngLat([lng,lat]).addTo(map);
+      _navDotCurrent={lng,lat};
+    } else {
+      // FIX 4: smooth animation instead of instant setLngLat
+      animateNavDotTo(lng,lat);
+    }
+
     const near=nearestIndex(nav.coordsLatLng,lat,lng);
     nav.traveledIdx=Math.max(nav.traveledIdx,near.idx);
     const distToRoute=near.distM;
@@ -375,7 +485,25 @@
     const pct=total>0?Math.min(99,Math.round((traveled/total)*100)):0;
     if(ui.progressBar)ui.progressBar.style.width=pct+"%";
     updateTraveledOverlay(nav.traveledIdx);
-    map.easeTo({center:[lng,lat],zoom:16,duration:800,essential:true});
+
+    /* FIX 4: Only pan the map if the user dot is going off-screen.
+       This eliminates the constant map re-centering flicker.
+       We use map.getBounds() to check if the current position is
+       still comfortably inside the viewport before panning. */
+    const bounds=map.getBounds();
+    const lngSpan=bounds.getEast()-bounds.getWest();
+    const latSpan=bounds.getNorth()-bounds.getSouth();
+    const paddingFrac=0.25; // pan when within 25% of edge
+    const offScreen=(
+      lng < bounds.getWest()  + lngSpan*paddingFrac ||
+      lng > bounds.getEast()  - lngSpan*paddingFrac ||
+      lat < bounds.getSouth() + latSpan*paddingFrac ||
+      lat > bounds.getNorth() - latSpan*paddingFrac
+    );
+    if(offScreen){
+      map.easeTo({center:[lng,lat],zoom:Math.max(15,map.getZoom()),duration:600,essential:true});
+    }
+
     const step=getStepForPosition(active.route,traveled);
     if(ui.navArrow)ui.navArrow.textContent=step.arrow;
     if(ui.navInstruction)ui.navInstruction.textContent=step.instruction;
