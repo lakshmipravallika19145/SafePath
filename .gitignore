@@ -1,19 +1,22 @@
 # Virtual environment
 jarvis_env/
 
+# Flask instance folder
+instance/
+
+# Local SQLite DB (not needed, using MySQL)
+saferoute.db
+
+# Data directories (user data, SOS logs — not for repo)
+data/user_data/
+
+# Environment variables (secrets — never commit this)
+.env
+
 # Python cache
 __pycache__/
 *.pyc
 *.pyo
-
-# Environment variables
-.env
-
-# Flask instance folder
-instance/
-
-# Audio files (optional if they are test files)
-*.wav
 
 # Logs
 *.log
@@ -24,7 +27,3 @@ instance/
 # OS junk
 .DS_Store
 Thumbs.db
-
-# Data directories not for repo commits
-data/user_data/
-saferoute.db

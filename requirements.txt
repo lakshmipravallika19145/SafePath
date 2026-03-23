@@ -1,9 +1,9 @@
 flask
 flask-cors
 flask-sqlalchemy
-flask-login
-werkzeug
 pymysql
-twilio
 python-dotenv
-
+werkzeug
+requests
+cryptography
+gunicorn

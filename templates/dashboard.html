@@ -4,12 +4,276 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SafePath – AI Safety Navigation</title>
-
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <style>
+    /* ── Auth bar ─────────────────────────────────────────── */
+    #auth-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 4000;
+      background: #0d1117;
+      border-bottom: 1px solid rgba(32,227,127,0.2);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 10px;
+      height: 44px;
+    }
+    #auth-bar .auth-brand {
+      margin-right: auto;
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #20e37f;
+      letter-spacing: 0.05em;
+    }
+    #auth-bar .auth-welcome {
+      font-size: 0.82rem;
+      color: rgba(232,239,255,0.55);
+    }
+    #auth-bar .auth-welcome span { color: #20e37f; font-weight: 600; }
+
+    .auth-btn {
+      background: transparent;
+      border: 1px solid rgba(232,239,255,0.2);
+      border-radius: 6px;
+      color: rgba(232,239,255,0.75);
+      padding: 5px 14px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .auth-btn:hover { border-color: #20e37f; color: #20e37f; }
+    .auth-btn--primary { background:#20e37f; border-color:#20e37f; color:#05060b; }
+    .auth-btn--primary:hover { background:#29ff9a; border-color:#29ff9a; color:#05060b; }
+    .auth-btn--danger { border-color:rgba(255,77,109,0.35); color:rgba(255,77,109,0.75); }
+    .auth-btn--danger:hover { border-color:#ff4d6d; color:#ff4d6d; }
+
+    /* push content below auth bar */
+    body { padding-top: 44px; }
+    #nav-banner     { top: 44px !important; }
+    #route-progress-bar { top: 44px !important; }
+
+    /* ── Shared modal base ────────────────────────────────── */
+    .sp-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 5000;
+      background: rgba(0,0,0,0.82);
+      align-items: center;
+      justify-content: center;
+    }
+    .sp-modal.active { display: flex; }
+    .sp-box {
+      background: #1a1f2e;
+      border: 1px solid rgba(32,227,127,0.25);
+      border-radius: 18px;
+      padding: 30px 28px;
+      width: 100%;
+      max-width: 380px;
+      display: flex;
+      flex-direction: column;
+      gap: 11px;
+      box-shadow: 0 24px 60px rgba(0,0,0,0.65);
+      max-height: 92vh;
+      overflow-y: auto;
+    }
+    .sp-box__title { color:#e8efff; font-size:1.2rem; font-weight:700; margin:0 0 2px; }
+    .sp-box__sub   { color:rgba(232,239,255,0.4); font-size:0.8rem; margin:0 0 4px; }
+    .sp-box label  { font-size:0.7rem; color:rgba(232,239,255,0.45); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:-6px; }
+    .sp-box input {
+      background: rgba(232,239,255,0.06);
+      border: 1px solid rgba(232,239,255,0.12);
+      border-radius: 8px; color:#e8efff;
+      padding: 10px 13px; font-size:0.9rem;
+      outline:none; width:100%; box-sizing:border-box;
+      transition:border-color 0.15s;
+    }
+    .sp-box input:focus { border-color:#20e37f; }
+    .sp-box input::placeholder { color:rgba(232,239,255,0.22); }
+    .sp-box__divider { border:none; border-top:1px solid rgba(232,239,255,0.08); margin:2px 0; }
+    .sp-box__section { font-size:0.7rem; color:rgba(232,239,255,0.3); text-transform:uppercase; letter-spacing:0.06em; }
+    .sp-box__err {
+      background:rgba(255,77,109,0.1); border:1px solid rgba(255,77,109,0.3);
+      border-radius:7px; color:#ff4d6d; font-size:0.8rem;
+      padding:8px 12px; display:none;
+    }
+    .sp-box__err.show { display:block; }
+    .sp-box__ok {
+      background:rgba(32,227,127,0.1); border:1px solid rgba(32,227,127,0.3);
+      border-radius:7px; color:#20e37f; font-size:0.8rem;
+      padding:8px 12px; display:none;
+    }
+    .sp-box__ok.show { display:block; }
+    .sp-box__actions { display:flex; gap:8px; margin-top:4px; }
+    .sp-box__actions .auth-btn { flex:1; padding:10px; font-size:0.85rem; border-radius:8px; }
+    .sp-hint { font-size:0.75rem; color:rgba(232,239,255,0.3); text-align:center; }
+    .sp-hint a { color:#20e37f; cursor:pointer; text-decoration:none; }
+
+    /* ── Nav banner ────────────────────────────────────────── */
+    #nav-banner {
+      display:none; position:fixed; top:44px; left:0; right:0; z-index:1000;
+      background:#1a1f2e; border-bottom:2px solid #20e37f;
+      box-shadow:0 4px 24px rgba(0,0,0,0.5);
+    }
+    #nav-banner.active { display:block; }
+    .nav-banner__top { display:flex; align-items:center; gap:16px; padding:12px 20px; background:#20e37f; }
+    .nav-banner__arrow { font-size:2rem; line-height:1; min-width:40px; text-align:center; }
+    .nav-banner__instruction { flex:1; font-size:1.1rem; font-weight:700; color:#05060b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .nav-banner__dist-next { font-size:0.85rem; font-weight:600; color:#05060b; opacity:0.75; white-space:nowrap; }
+    .nav-banner__bottom { display:flex; align-items:center; justify-content:space-between; padding:8px 20px; background:#1a1f2e; gap:8px; }
+    .nav-stat { display:flex; flex-direction:column; align-items:center; }
+    .nav-stat__val { font-size:1.1rem; font-weight:700; color:#e8efff; }
+    .nav-stat__lbl { font-size:0.65rem; color:rgba(232,239,255,0.5); text-transform:uppercase; letter-spacing:0.05em; }
+    .nav-banner__stop { background:#ff4d6d; color:#fff; border:none; border-radius:8px; padding:6px 14px; font-weight:700; font-size:0.8rem; cursor:pointer; }
+
+    /* ── Arrived overlay ───────────────────────────────────── */
+    #arrived-overlay { display:none; position:fixed; inset:0; z-index:2000; background:rgba(0,0,0,0.7); align-items:center; justify-content:center; }
+    #arrived-overlay.active { display:flex; }
+    .arrived-box { background:#1a1f2e; border:2px solid #20e37f; border-radius:16px; padding:36px 40px; text-align:center; max-width:320px; }
+    .arrived-box__icon  { font-size:3rem; margin-bottom:12px; }
+    .arrived-box__title { font-size:1.4rem; font-weight:700; color:#20e37f; margin-bottom:8px; }
+    .arrived-box__sub   { font-size:0.9rem; color:rgba(232,239,255,0.7); margin-bottom:24px; }
+    .arrived-box__btn   { background:#20e37f; color:#05060b; border:none; border-radius:8px; padding:10px 28px; font-weight:700; font-size:1rem; cursor:pointer; }
+
+    /* ── Progress bar ──────────────────────────────────────── */
+    #route-progress-bar { display:none; position:fixed; top:44px; left:0; height:3px; background:#20e37f; z-index:999; transition:width 0.5s ease; box-shadow:0 0 8px #20e37f; }
+  </style>
 </head>
 
 <body>
+
+  <!-- ══════════════════════════════════════════════════════
+       AUTH BAR
+  ══════════════════════════════════════════════════════════ -->
+  <div id="auth-bar">
+    <div class="auth-brand">🛡️ SafePath</div>
+    <div id="auth-welcome" class="auth-welcome" style="display:none">
+      Welcome, <span id="auth-username"></span>
+    </div>
+    <div id="auth-logged-out" style="display:flex;gap:8px">
+      <button class="auth-btn"             id="btn-open-login">Log In</button>
+      <button class="auth-btn auth-btn--primary" id="btn-open-signup">Sign Up</button>
+    </div>
+    <div id="auth-logged-in" style="display:none;gap:8px;align-items:center">
+      <button class="auth-btn"             id="btn-edit-profile">✏️ Edit Profile</button>
+      <button class="auth-btn auth-btn--danger" id="btn-logout">Log Out</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       LOGIN MODAL
+  ══════════════════════════════════════════════════════════ -->
+  <div id="loginModal" class="sp-modal">
+    <div class="sp-box">
+      <div class="sp-box__title">👋 Log In</div>
+      <div class="sp-box__sub">Access your profile and emergency contacts.</div>
+      <div id="login-err" class="sp-box__err"></div>
+      <label>Phone Number</label>
+      <input type="tel"      id="login-phone"    placeholder="10-digit mobile number" maxlength="10" />
+      <label>Password</label>
+      <input type="password" id="login-password" placeholder="Your password" />
+      <div class="sp-box__actions">
+        <button class="auth-btn"             id="btn-login-cancel">Cancel</button>
+        <button class="auth-btn auth-btn--primary" id="btn-login-submit">Log In →</button>
+      </div>
+      <div class="sp-hint">No account? <a id="switch-to-signup">Sign up here</a></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       SIGNUP MODAL
+  ══════════════════════════════════════════════════════════ -->
+  <div id="signupModal" class="sp-modal">
+    <div class="sp-box">
+      <div class="sp-box__title">🛡️ Create Account</div>
+      <div class="sp-box__sub">Your profile &amp; emergency contacts are stored securely in our database.</div>
+      <div id="signup-err" class="sp-box__err"></div>
+      <label>Full Name</label>
+      <input type="text"     id="signup-name"     placeholder="Your full name" />
+      <label>Phone Number</label>
+      <input type="tel"      id="signup-phone"    placeholder="10-digit mobile number" maxlength="10" />
+      <label>Email (optional)</label>
+      <input type="email"    id="signup-email"    placeholder="your@email.com" />
+      <label>Password</label>
+      <input type="password" id="signup-password" placeholder="Minimum 6 characters" />
+      <hr class="sp-box__divider" />
+      <div class="sp-box__section">🚨 Emergency Contacts (10-digit Indian mobile)</div>
+      <input type="tel" id="signup-c1" placeholder="Contact 1 — required" maxlength="10" />
+      <input type="tel" id="signup-c2" placeholder="Contact 2 — optional"  maxlength="10" />
+      <input type="tel" id="signup-c3" placeholder="Contact 3 — optional"  maxlength="10" />
+      <div class="sp-box__actions">
+        <button class="auth-btn"             id="btn-signup-cancel">Cancel</button>
+        <button class="auth-btn auth-btn--primary" id="btn-signup-submit">Create Account →</button>
+      </div>
+      <div class="sp-hint">Already have an account? <a id="switch-to-login">Log in here</a></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       EDIT PROFILE MODAL
+  ══════════════════════════════════════════════════════════ -->
+  <div id="editModal" class="sp-modal">
+    <div class="sp-box">
+      <div class="sp-box__title">✏️ Edit Profile</div>
+      <div id="edit-err" class="sp-box__err"></div>
+      <div id="edit-ok"  class="sp-box__ok">✅ Profile updated successfully!</div>
+      <div class="sp-box__section">Personal Details</div>
+      <label>Full Name</label>
+      <input type="text"  id="edit-name"  placeholder="Your full name" />
+      <label>Email (optional)</label>
+      <input type="email" id="edit-email" placeholder="your@email.com" />
+      <div class="sp-box__section">Emergency Contacts (10-digit)</div>
+      <label>Contact 1</label>
+      <input type="tel" id="edit-c1" placeholder="Required" maxlength="10" />
+      <label>Contact 2</label>
+      <input type="tel" id="edit-c2" placeholder="Optional"  maxlength="10" />
+      <label>Contact 3</label>
+      <input type="tel" id="edit-c3" placeholder="Optional"  maxlength="10" />
+      <div class="sp-box__section">Change Password (leave blank to keep current)</div>
+      <label>Current Password</label>
+      <input type="password" id="edit-curr-pw" placeholder="Required only if changing password" />
+      <label>New Password</label>
+      <input type="password" id="edit-new-pw"  placeholder="Minimum 6 characters" />
+      <div class="sp-box__actions">
+        <button class="auth-btn"             id="btn-edit-cancel">Cancel</button>
+        <button class="auth-btn auth-btn--primary" id="btn-edit-save">Save Changes →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Route progress bar -->
+  <div id="route-progress-bar"></div>
+
+  <!-- Nav banner -->
+  <div id="nav-banner" role="region" aria-label="Navigation banner">
+    <div class="nav-banner__top">
+      <div class="nav-banner__arrow"    id="nav-arrow">⬆️</div>
+      <div class="nav-banner__instruction" id="nav-instruction">Starting navigation…</div>
+      <div class="nav-banner__dist-next"   id="nav-dist-next"></div>
+    </div>
+    <div class="nav-banner__bottom">
+      <div class="nav-stat"><div class="nav-stat__val" id="nav-remaining">—</div><div class="nav-stat__lbl">Remaining</div></div>
+      <div class="nav-stat"><div class="nav-stat__val" id="nav-eta">—</div><div class="nav-stat__lbl">Arrival</div></div>
+      <div class="nav-stat"><div class="nav-stat__val" id="nav-speed">—</div><div class="nav-stat__lbl">Speed</div></div>
+      <div class="nav-stat"><div class="nav-stat__val" id="nav-safety">—</div><div class="nav-stat__lbl">Safety</div></div>
+      <button class="nav-banner__stop" id="nav-stop-btn">■ Stop</button>
+    </div>
+  </div>
+
+  <!-- Arrived overlay -->
+  <div id="arrived-overlay">
+    <div class="arrived-box">
+      <div class="arrived-box__icon">🏁</div>
+      <div class="arrived-box__title">You have arrived!</div>
+      <div class="arrived-box__sub" id="arrived-dest">Destination reached.</div>
+      <button class="arrived-box__btn" id="arrived-dismiss">Done</button>
+    </div>
+  </div>
+
   <div class="app-shell">
     <!-- Left Sidebar -->
     <aside class="panel sidebar" aria-label="Route planning sidebar">
@@ -23,117 +287,67 @@
           <div class="brand__subtitle">AI Safety Navigation</div>
         </div>
       </div>
-
       <div class="section">
         <div class="section__title">Route Planning</div>
-
         <label class="field" id="start-wrap">
           <span class="field__label">Current Location</span>
           <input id="input-current" class="field__input" placeholder="e.g., Benz Circle" autocomplete="off" />
-          <div id="suggest-current" class="suggest" aria-label="Start location suggestions"></div>
+          <div id="suggest-current" class="suggest"></div>
         </label>
-
         <label class="field" id="dest-wrap">
           <span class="field__label">Destination</span>
-          <input id="input-dest" class="field__input" placeholder="e.g., Vijayawada Railway Station" autocomplete="off" />
-          <div id="suggest-dest" class="suggest" aria-label="Destination suggestions"></div>
+          <input id="input-dest" class="field__input" placeholder="e.g., Mangalagiri" autocomplete="off" />
+          <div id="suggest-dest" class="suggest"></div>
         </label>
-
         <div class="row">
-          <button id="btn-find" class="btn btn--primary">Find Safe Routes</button>
-          <button id="btn-reset" class="btn btn--ghost" title="Clear markers and routes">Reset</button>
+          <button id="btn-find"  class="btn btn--primary">Find Safe Routes</button>
+          <button id="btn-reset" class="btn btn--ghost">Reset</button>
         </div>
-
-        <div class="hint">
-          Tip: you can also click on the map to set Start then Destination.
-        </div>
+        <div class="hint">Tip: click the map to set Start then Destination.</div>
       </div>
-
       <div class="section">
         <div class="section__title">Optimization</div>
-        <div class="chips" role="radiogroup" aria-label="Optimization options">
-          <label class="chip">
-            <input type="radio" name="opt" value="safest" checked />
-            <span>Safest Route</span>
-          </label>
-          <label class="chip">
-            <input type="radio" name="opt" value="balanced" />
-            <span>Balanced Route</span>
-          </label>
-          <label class="chip">
-            <input type="radio" name="opt" value="fastest" />
-            <span>Fastest Route</span>
-          </label>
-          <label class="chip">
-            <input type="radio" name="opt" value="welllit" />
-            <span>Well‑Lit Route</span>
-          </label>
+        <div class="chips" role="radiogroup">
+          <label class="chip"><input type="radio" name="opt" value="safest"   checked /><span>Safest Route</span></label>
+          <label class="chip"><input type="radio" name="opt" value="balanced"         /><span>Balanced Route</span></label>
+          <label class="chip"><input type="radio" name="opt" value="fastest"          /><span>Fastest Route</span></label>
+          <label class="chip"><input type="radio" name="opt" value="welllit"          /><span>Well‑Lit Route</span></label>
         </div>
       </div>
-
       <div class="section">
         <div class="section__title">Safety Filters</div>
         <div class="toggles">
-          <label class="toggle">
-            <span class="toggle__text">Street Lighting</span>
-            <input id="t-light" type="checkbox" checked />
-            <span class="toggle__ui" aria-hidden="true"></span>
-          </label>
-          <label class="toggle">
-            <span class="toggle__text">Crowd Density</span>
-            <input id="t-crowd" type="checkbox" checked />
-            <span class="toggle__ui" aria-hidden="true"></span>
-          </label>
-          <label class="toggle">
-            <span class="toggle__text">Police Patrol</span>
-            <input id="t-police" type="checkbox" checked />
-            <span class="toggle__ui" aria-hidden="true"></span>
-          </label>
-          <label class="toggle">
-            <span class="toggle__text">Crime Reports</span>
-            <input id="t-crime" type="checkbox" checked />
-            <span class="toggle__ui" aria-hidden="true"></span>
-          </label>
-          <label class="toggle">
-            <span class="toggle__text">CCTV Coverage</span>
-            <input id="t-cctv" type="checkbox" checked />
-            <span class="toggle__ui" aria-hidden="true"></span>
-          </label>
+          <label class="toggle"><span class="toggle__text">Street Lighting</span><input id="t-light"  type="checkbox" checked /><span class="toggle__ui"></span></label>
+          <label class="toggle"><span class="toggle__text">Crowd Density</span>  <input id="t-crowd"  type="checkbox" checked /><span class="toggle__ui"></span></label>
+          <label class="toggle"><span class="toggle__text">Police Patrol</span>  <input id="t-police" type="checkbox" checked /><span class="toggle__ui"></span></label>
+          <label class="toggle"><span class="toggle__text">Crime Reports</span>  <input id="t-crime"  type="checkbox" checked /><span class="toggle__ui"></span></label>
+          <label class="toggle"><span class="toggle__text">CCTV Coverage</span>  <input id="t-cctv"   type="checkbox" checked /><span class="toggle__ui"></span></label>
         </div>
       </div>
-
       <div class="section">
         <div class="section__title">Routes</div>
         <div id="route-cards" class="cards">
-          <!-- Filled by JS -->
           <div class="card card--skeleton">
             <div class="card__title">Safest Route</div>
-            <div class="card__meta">
-              <span class="pill">ETA —</span>
-              <span class="pill">— km</span>
-              <span class="pill pill--accent">—%</span>
-            </div>
-            <div class="bar">
-              <div class="bar__fill" style="width: 0%"></div>
-            </div>
+            <div class="card__meta"><span class="pill">ETA —</span><span class="pill">— km</span><span class="pill pill--accent">—%</span></div>
+            <div class="bar"><div class="bar__fill" style="width:0%"></div></div>
           </div>
         </div>
       </div>
     </aside>
 
-    <!-- Center Map -->
+    <!-- Map -->
     <main class="map-wrap" aria-label="Map panel">
       <div class="map-top">
         <div class="map-top__left">
-          <div class="badge">Vijayawada Prototype</div>
+          <div class="badge">SafePath Prototype</div>
           <div id="status" class="status">Loading safety dataset…</div>
         </div>
         <div class="map-top__right">
-          <button id="btn-heat" class="btn btn--ghost">Toggle Heatmap</button>
-          <button id="btn-report" class="btn btn--ghost">Report at last click</button>
+          <button id="btn-heat"          class="btn btn--ghost">Toggle Heatmap</button>
+          <button id="btn-report"        class="btn btn--ghost">Report at last click</button>
         </div>
       </div>
-
       <div class="map-frame">
         <div id="map" class="map"></div>
         <div class="map-grid" aria-hidden="true"></div>
@@ -145,38 +359,22 @@
       <div class="section">
         <div class="section__title">Safety Legend</div>
         <div class="legend">
-          <div class="legend__item">
-            <span class="dot dot--safe"></span> Safe
-          </div>
-          <div class="legend__item">
-            <span class="dot dot--moderate"></span> Moderate
-          </div>
-          <div class="legend__item">
-            <span class="dot dot--unsafe"></span> Unsafe
-          </div>
+          <div class="legend__item"><span class="dot dot--safe"></span> Safe</div>
+          <div class="legend__item"><span class="dot dot--moderate"></span> Moderate</div>
+          <div class="legend__item"><span class="dot dot--unsafe"></span> Unsafe</div>
         </div>
-        <div class="legend__sub">
-          Green routes are recommended; red routes indicate higher risk.
-        </div>
+        <div class="legend__sub">Green routes recommended; red indicates higher risk.</div>
       </div>
-
       <div class="section">
         <div class="section__title">Incident Insights</div>
         <div id="incident-list" class="incidents">
           <div class="incident incident--muted">Generate routes to see nearby high‑risk points.</div>
         </div>
       </div>
-
       <div class="section">
         <div class="section__title">Quick Report</div>
-        <label class="field">
-          <span class="field__label">Place name</span>
-          <input id="report-place" class="field__input" placeholder="e.g., MG Road lane" />
-        </label>
-        <label class="field">
-          <span class="field__label">Description</span>
-          <input id="report-desc" class="field__input" placeholder="e.g., Poor lighting" />
-        </label>
+        <label class="field"><span class="field__label">Place name</span><input id="report-place" class="field__input" placeholder="e.g., MG Road lane" /></label>
+        <label class="field"><span class="field__label">Description</span><input id="report-desc"  class="field__input" placeholder="e.g., Poor lighting" /></label>
         <label class="field">
           <span class="field__label">Safety rating</span>
           <select id="report-rating" class="field__input">
@@ -193,67 +391,270 @@
     </aside>
   </div>
 
-  <!-- Bottom navigation / Navigation Dashboard -->
+  <!-- Bottom Nav -->
   <div class="bottom-nav" role="region" aria-label="Navigation dashboard">
     <div class="bottom-nav__left">
-      <div class="mini">
-        <div class="mini__label">Current Location</div>
-        <div id="bn-current" class="mini__value">—</div>
-      </div>
-      <div class="mini">
-        <div class="mini__label">Destination</div>
-        <div id="bn-dest" class="mini__value">—</div>
-      </div>
-      <div class="mini mini--wide">
-        <div class="mini__label">AI Recommendation</div>
-        <div id="bn-reco" class="mini__value">—</div>
-      </div>
-      <div class="mini">
-        <div class="mini__label">Remaining Distance</div>
-        <div id="bn-remaining" class="mini__value">—</div>
-      </div>
-      <div class="mini">
-        <div class="mini__label">ETA</div>
-        <div id="bn-eta" class="mini__value">—</div>
-      </div>
-      <div class="mini">
-        <div class="mini__label">Current Speed</div>
-        <div id="bn-speed" class="mini__value">—</div>
-      </div>
-      <div class="mini">
-        <div class="mini__label">Next Waypoint</div>
-        <div id="bn-next" class="mini__value">—</div>
-      </div>
-      <div class="mini">
-        <div class="mini__label">Safety Level</div>
-        <div id="bn-score" class="mini__value">—</div>
-      </div>
+      <div class="mini"><div class="mini__label">Current Location</div><div id="bn-current" class="mini__value">—</div></div>
+      <div class="mini"><div class="mini__label">Destination</div><div id="bn-dest" class="mini__value">—</div></div>
+      <div class="mini mini--wide"><div class="mini__label">AI Recommendation</div><div id="bn-reco" class="mini__value">—</div></div>
+      <div class="mini"><div class="mini__label">Remaining Distance</div><div id="bn-remaining" class="mini__value">—</div></div>
+      <div class="mini"><div class="mini__label">ETA</div><div id="bn-eta" class="mini__value">—</div></div>
+      <div class="mini"><div class="mini__label">Current Speed</div><div id="bn-speed" class="mini__value">—</div></div>
+      <div class="mini"><div class="mini__label">Next Waypoint</div><div id="bn-next" class="mini__value">—</div></div>
+      <div class="mini"><div class="mini__label">Safety Level</div><div id="bn-score" class="mini__value">—</div></div>
     </div>
     <div class="bottom-nav__right">
       <button id="btn-start-nav" class="btn btn--primary btn--glow">Start Navigation</button>
-      <button id="sosBtn" class="btn btn--danger">🚨 SOS</button>
+      <button id="sosBtn"        class="btn btn--danger">🚨 SOS</button>
     </div>
   </div>
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
-  <div id="profileModal" class="profile-modal">
-  <div class="profile-box">
-    <h2>Safety Profile Setup</h2>
 
-    <input type="text" id="userName" placeholder="Your Name">
+  <!-- ══════════════════════════════════════════════════════
+       Auth + SOS JS  —  no localStorage, no popup on load
+  ══════════════════════════════════════════════════════════ -->
+  <script>
+  (function () {
+    let currentUser = null;
+    const $ = id => document.getElementById(id);
 
-    <input type="text" id="userPhone" placeholder="Phone Number">
+    // ── Helpers ───────────────────────────────────────────
+    function showErr(id, msg) { const el=$(id); if(el){el.textContent=msg;el.classList.add("show");} }
+    function hideErr(id)      { const el=$(id); if(el) el.classList.remove("show"); }
+    function showOk(id)       { const el=$(id); if(el) el.classList.add("show"); }
+    function hideOk(id)       { const el=$(id); if(el) el.classList.remove("show"); }
 
-    <h3>Emergency Contacts</h3>
+    function cleanPhone(v) {
+      return (v||"").toString().trim().replace(/[\s\-\+]/g,"");
+    }
+    function validContact(v) { return /^\d{10}$/.test(cleanPhone(v)); }
 
-    <input type="text" id="contact1" placeholder="Contact 1 Phone">
-    <input type="text" id="contact2" placeholder="Contact 2 Phone">
-    <input type="text" id="contact3" placeholder="Contact 3 Phone">
+    function openModal(id)  { const m=$(id); if(m){ m.classList.add("active"); } }
+    function closeModal(id) { const m=$(id); if(m){ m.classList.remove("active"); } }
 
-    <button id="saveProfile">Save Profile</button>
-  </div>
-</div>
+    // Close on backdrop click
+    ["loginModal","signupModal","editModal"].forEach(id => {
+      const m=$(id);
+      if(m) m.addEventListener("click", e => { if(e.target===m) closeModal(id); });
+    });
+
+    // ── Update auth UI ────────────────────────────────────
+    function setAuthUI(user) {
+      currentUser = user;
+      if (user) {
+        $("auth-logged-out").style.display = "none";
+        $("auth-logged-in").style.display  = "flex";
+        $("auth-welcome").style.display    = "block";
+        $("auth-username").textContent     = user.name || user.phone;
+      } else {
+        $("auth-logged-out").style.display = "flex";
+        $("auth-logged-in").style.display  = "none";
+        $("auth-welcome").style.display    = "none";
+      }
+    }
+
+    // ── Check server session on load ──────────────────────
+    async function checkSession() {
+      try {
+        const r = await fetch("/api/me");
+        const d = await r.json();
+        setAuthUI(d.logged_in ? d.user : null);
+      } catch(_) { setAuthUI(null); }
+    }
+
+    // ── Login ─────────────────────────────────────────────
+    $("btn-open-login").addEventListener("click", () => {
+      hideErr("login-err"); openModal("loginModal");
+    });
+    $("btn-login-cancel").addEventListener("click", () => closeModal("loginModal"));
+    $("switch-to-signup").addEventListener("click", () => { closeModal("loginModal"); openModal("signupModal"); });
+
+    $("btn-login-submit").addEventListener("click", async () => {
+      hideErr("login-err");
+      const phone    = $("login-phone").value.trim();
+      const password = $("login-password").value;
+      if (!phone || !password) { showErr("login-err","Phone and password are required."); return; }
+      try {
+        const r = await fetch("/api/login", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({phone, password})
+        });
+        const d = await r.json();
+        if (!r.ok) { showErr("login-err", d.error||"Login failed."); return; }
+        setAuthUI(d.user);
+        closeModal("loginModal");
+        $("login-phone").value = $("login-password").value = "";
+      } catch(_) { showErr("login-err","Network error. Please try again."); }
+    });
+
+    // ── Signup ────────────────────────────────────────────
+    $("btn-open-signup").addEventListener("click", () => {
+      hideErr("signup-err"); openModal("signupModal");
+    });
+    $("btn-signup-cancel").addEventListener("click", () => closeModal("signupModal"));
+    $("switch-to-login").addEventListener("click", () => { closeModal("signupModal"); openModal("loginModal"); });
+
+    $("btn-signup-submit").addEventListener("click", async () => {
+      hideErr("signup-err");
+      const name     = $("signup-name").value.trim();
+      const phone    = $("signup-phone").value.trim();
+      const email    = $("signup-email").value.trim();
+      const password = $("signup-password").value;
+      const c1 = $("signup-c1").value.trim();
+      const c2 = $("signup-c2").value.trim();
+      const c3 = $("signup-c3").value.trim();
+      if (!name)     { showErr("signup-err","Full name is required."); return; }
+      if (!phone)    { showErr("signup-err","Phone number is required."); return; }
+      if (!password) { showErr("signup-err","Password is required (min 6 chars)."); return; }
+      if (!validContact(c1)) { showErr("signup-err","At least one valid 10-digit emergency contact is required."); return; }
+      try {
+        const r = await fetch("/api/signup", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({name, phone, email:email||null, password, contact1:c1, contact2:c2, contact3:c3})
+        });
+        const d = await r.json();
+        if (!r.ok) { showErr("signup-err", d.error||"Signup failed."); return; }
+        setAuthUI(d.user);
+        closeModal("signupModal");
+        ["signup-name","signup-phone","signup-email","signup-password","signup-c1","signup-c2","signup-c3"]
+          .forEach(id => $(id).value="");
+      } catch(_) { showErr("signup-err","Network error. Please try again."); }
+    });
+
+    // ── Logout ────────────────────────────────────────────
+    $("btn-logout").addEventListener("click", async () => {
+      try { await fetch("/api/logout",{method:"POST"}); } catch(_){}
+      setAuthUI(null);
+    });
+
+    // ── Edit Profile ──────────────────────────────────────
+    $("btn-edit-profile").addEventListener("click", () => {
+      hideErr("edit-err"); hideOk("edit-ok");
+      if (currentUser) {
+        $("edit-name").value    = currentUser.name     || "";
+        $("edit-email").value   = currentUser.email    || "";
+        $("edit-c1").value      = currentUser.contact1 || "";
+        $("edit-c2").value      = currentUser.contact2 || "";
+        $("edit-c3").value      = currentUser.contact3 || "";
+        $("edit-curr-pw").value = "";
+        $("edit-new-pw").value  = "";
+      }
+      openModal("editModal");
+    });
+    $("btn-edit-cancel").addEventListener("click", () => closeModal("editModal"));
+
+    $("btn-edit-save").addEventListener("click", async () => {
+      hideErr("edit-err"); hideOk("edit-ok");
+      const payload = {
+        name:             $("edit-name").value.trim()    || undefined,
+        email:            $("edit-email").value.trim()   || undefined,
+        contact1:         $("edit-c1").value.trim(),
+        contact2:         $("edit-c2").value.trim(),
+        contact3:         $("edit-c3").value.trim(),
+        current_password: $("edit-curr-pw").value || undefined,
+        new_password:     $("edit-new-pw").value  || undefined,
+      };
+      try {
+        const r = await fetch("/api/edit_profile",{
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify(payload)
+        });
+        const d = await r.json();
+        if (!r.ok) { showErr("edit-err", d.error||"Update failed."); return; }
+        setAuthUI(d.user);
+        showOk("edit-ok");
+        setTimeout(() => closeModal("editModal"), 1400);
+      } catch(_) { showErr("edit-err","Network error. Please try again."); }
+    });
+
+    // ── SOS — opens login if not signed in ───────────────
+    const sosBtn = $("sosBtn");
+    if (sosBtn) {
+      let sirenAudio=null, sosLocked=false;
+      const flash=document.createElement("div");
+      flash.style.cssText="position:fixed;inset:0;background:rgba(255,0,0,0.2);pointer-events:none;z-index:9999;display:none;";
+      document.body.appendChild(flash);
+
+      function startAlarm(){
+  flash.style.display="block";
+  setTimeout(()=>{ flash.style.display="none"; },3000);
+}
+
+      function sendSosOnce(lat,lng,profile,contacts){
+        fetch("/api/sos_alert",{
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({
+            name:profile.name, phone:profile.phone,
+            contacts, lat, lng,
+            map_link:`https://maps.google.com/?q=${lat},${lng}`,
+            time:new Date().toISOString()
+          })
+        })
+        .then(r=>r.json())
+        .then(d=>{ alert(`🚨 Emergency alert sent to ${contacts.length} contact(s)!`); })
+        .catch(()=>{ alert("🚨 SOS triggered but failed to reach server."); });
+      }
+
+      sosBtn.addEventListener("click", async function(){
+        if (sosLocked) return;
+
+        // ── If NOT logged in → open login modal and stop ──
+        if (!currentUser) {
+          hideErr("login-err");
+          openModal("loginModal");
+          // Show a hint inside the login modal
+          showErr("login-err","Please log in first to use the SOS feature.");
+          return;
+        }
+
+        // ── Logged in — proceed with SOS ──────────────────
+        const contacts = [currentUser.contact1, currentUser.contact2, currentUser.contact3].filter(Boolean);
+        if (!contacts.length) {
+          // No contacts set — open edit profile
+          alert("No emergency contacts found. Please add contacts in your profile.");
+          hideErr("edit-err"); hideOk("edit-ok");
+          $("edit-name").value    = currentUser.name     || "";
+          $("edit-email").value   = currentUser.email    || "";
+          $("edit-c1").value      = currentUser.contact1 || "";
+          $("edit-c2").value      = currentUser.contact2 || "";
+          $("edit-c3").value      = currentUser.contact3 || "";
+          $("edit-curr-pw").value = "";
+          $("edit-new-pw").value  = "";
+          openModal("editModal");
+          return;
+        }
+
+        sosLocked=true;
+        setTimeout(()=>{ sosLocked=false; },10000);
+        startAlarm();
+
+        navigator.geolocation.getCurrentPosition(
+          pos => sendSosOnce(pos.coords.latitude, pos.coords.longitude, currentUser, contacts),
+          err => {
+            if(err.code===1){ alert("Location permission denied."); sosLocked=false; return; }
+            navigator.geolocation.getCurrentPosition(
+              pos => sendSosOnce(pos.coords.latitude, pos.coords.longitude, currentUser, contacts),
+              ()=>{
+                const input=prompt("GPS unavailable. Enter location (e.g. 16.5062,80.6480):");
+                if(!input){ sosLocked=false; return; }
+                const m=input.trim().match(/^([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)$/);
+                if(m) sendSosOnce(parseFloat(m[1]),parseFloat(m[2]),currentUser,contacts);
+                else  sendSosOnce(16.5062,80.6480,currentUser,contacts);
+              },
+              {enableHighAccuracy:false,timeout:20000,maximumAge:60000}
+            );
+          },
+          {enableHighAccuracy:true,timeout:15000,maximumAge:0}
+        );
+      });
+    }
+
+    // ── Boot ──────────────────────────────────────────────
+    checkSession();
+
+  })();
+  </script>
 </body>
 </html>
-
