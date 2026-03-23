@@ -32,13 +32,16 @@
     nav:{active:null,coordsLatLng:[],cumDistM:[],startedAtMs:null,lastRerouteAtMs:0,traveledIdx:0,arrivedFired:false},
   };
 
+  const isMobile=()=>window.innerWidth<=760;
   const ui={
     status:$("status"),cards:$("route-cards"),incidents:$("incident-list"),
     bnCurrent:$("bn-current")||{textContent:""},bnDest:$("bn-dest")||{textContent:""},
     bnReco:$("bn-reco"),bnEta:$("bn-eta"),bnRemaining:$("bn-remaining"),
     bnSpeed:$("bn-speed")||{textContent:""},bnNext:$("bn-next"),bnScore:$("bn-score"),
-    inputStart:$("input-current"),inputEnd:$("input-dest"),
-    sugStart:$("suggest-current"),sugEnd:$("suggest-dest"),
+    get inputStart(){return isMobile()&&$("mob-input-start")?$("mob-input-start"):$("input-current");},
+    get inputEnd()  {return isMobile()&&$("mob-input-dest")?$("mob-input-dest"):$("input-dest");},
+    get sugStart(){return isMobile()&&$("mob-suggest-start")?$("mob-suggest-start"):$("suggest-current");},
+    get sugEnd()  {return isMobile()&&$("mob-suggest-dest")?$("mob-suggest-dest"):$("suggest-dest");},
     navBanner:$("nav-banner"),navArrow:$("nav-arrow"),navInstruction:$("nav-instruction"),
     navDistNext:$("nav-dist-next"),navRemaining:$("nav-remaining"),navEta:$("nav-eta"),
     navSpeed:$("nav-speed"),navSafety:$("nav-safety"),
@@ -217,9 +220,21 @@
   const debouncedStartSuggest=debounce(async()=>{const q=ui.inputStart.value.trim();if(q.length<2){renderSuggestions(ui.sugStart,{results:[]},()=>{});return;}if(startAbort)startAbort.abort();startAbort=new AbortController();try{const p=await fetchSuggestions(q,startAbort);renderSuggestions(ui.sugStart,p,item=>{ui.inputStart.value=item.display_name;state.start={lat:item.lat,lng:item.lng,label:item.display_name};setStartMarker([item.lat,item.lng],"Start");renderSuggestions(ui.sugStart,{results:[]},()=>{});map.flyTo({center:[item.lng,item.lat],zoom:Math.max(14,map.getZoom())});fitToStartEnd();});}catch(_){}},300);
   const debouncedEndSuggest=debounce(async()=>{const q=ui.inputEnd.value.trim();if(q.length<2){renderSuggestions(ui.sugEnd,{results:[]},()=>{});return;}if(endAbort)endAbort.abort();endAbort=new AbortController();try{const p=await fetchSuggestions(q,endAbort);renderSuggestions(ui.sugEnd,p,item=>{ui.inputEnd.value=item.display_name;state.end={lat:item.lat,lng:item.lng,label:item.display_name};setEndMarker([item.lat,item.lng],"Destination");renderSuggestions(ui.sugEnd,{results:[]},()=>{});map.flyTo({center:[item.lng,item.lat],zoom:Math.max(14,map.getZoom())});fitToStartEnd();});}catch(_){}},300);
   document.addEventListener("click",e=>{if(!e.target.closest?.("#start-wrap")&&!e.target.closest?.("#dest-wrap")){ui.sugStart.classList.remove("suggest--open");ui.sugEnd.classList.remove("suggest--open");}});
-  ui.inputStart.addEventListener("input",debouncedStartSuggest);ui.inputEnd.addEventListener("input",debouncedEndSuggest);
-  ui.inputStart.addEventListener("input",()=>{if(state.start&&ui.inputStart.value.trim()!==(state.start.label||"").trim()){state.start=null;startMarker?.remove();startMarker=null;}});
-  ui.inputEnd.addEventListener("input",()=>{if(state.end&&ui.inputEnd.value.trim()!==(state.end.label||"").trim()){state.end=null;endMarker?.remove();endMarker=null;}});
+  // Attach input listeners to whichever inputs are active (mobile or desktop)
+  function attachInputListeners(){
+    const inpS=ui.inputStart, inpE=ui.inputEnd;
+    inpS.addEventListener("input",debouncedStartSuggest);
+    inpE.addEventListener("input",debouncedEndSuggest);
+    inpS.addEventListener("input",()=>{if(state.start&&inpS.value.trim()!==(state.start.label||"").trim()){state.start=null;startMarker?.remove();startMarker=null;}});
+    inpE.addEventListener("input",()=>{if(state.end&&inpE.value.trim()!==(state.end.label||"").trim()){state.end=null;endMarker?.remove();endMarker=null;}});
+    // Also attach to the hidden desktop inputs on mobile so nothing breaks
+    if(isMobile()){
+      const ds=$("input-current"), de=$("input-dest");
+      if(ds&&ds!==inpS){ds.addEventListener("input",debouncedStartSuggest);}
+      if(de&&de!==inpE){de.addEventListener("input",debouncedEndSuggest);}
+    }
+  }
+  attachInputListeners();
 
   function buildWeights(){const on=id=>$(id).checked;return{street_lighting:on("t-light")?0.25:0.05,crowd_density:on("t-crowd")?0.15:0.05,police_proximity:on("t-police")?0.10:0.03,cctv_coverage:on("t-cctv")?0.10:0.03,road_visibility:0.10,traffic_density:0.10,crime_rate:on("t-crime")?0.15:0.08,incident_reports:0.05};}
 

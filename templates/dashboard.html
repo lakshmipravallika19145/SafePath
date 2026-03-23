@@ -611,44 +611,15 @@
       obs.observe(desktopStatus, { childList:true, subtree:true, characterData:true });
     }
 
-    /* ── Wire mobile search inputs to app.js state ───────── */
-    // app.js exposes ui.inputStart / ui.inputEnd — we mirror mobile inputs
-    function syncToDesktop(mobInput, deskInput, sugMob, sugDesk) {
-      // keep desktop input in sync (app.js listens to desktop inputs)
-      mobInput.addEventListener("input", () => {
-        deskInput.value = mobInput.value;
-        deskInput.dispatchEvent(new Event("input", { bubbles: true }));
-      });
-      // mirror suggestions from desktop suggest div to mobile
-      const obs = new MutationObserver(() => {
-        sugMob.innerHTML = sugDesk.innerHTML;
-        if (sugDesk.classList.contains("suggest--open")) {
-          sugMob.classList.add("suggest--open");
-        } else {
-          sugMob.classList.remove("suggest--open");
-        }
-        // rewire click events on cloned buttons
-        sugMob.querySelectorAll(".suggest__item").forEach((btn, i) => {
-          const orig = sugDesk.querySelectorAll(".suggest__item")[i];
-          if (orig) btn.addEventListener("click", () => orig.click());
-        });
-      });
-      obs.observe(sugDesk, { childList: true, attributes: true, attributeFilter: ["class"] });
-    }
-
-    syncToDesktop(
-      $("mob-input-start"), $("input-current"),
-      $("mob-suggest-start"), $("suggest-current")
-    );
-    syncToDesktop(
-      $("mob-input-dest"), $("input-dest"),
-      $("mob-suggest-dest"), $("suggest-dest")
-    );
+    /* ── app.js now handles mobile inputs directly via isMobile() getters ── */
+    // No mirroring needed — app.js ui.inputStart/inputEnd/sugStart/sugEnd
+    // are getters that return mobile elements on mobile, desktop on desktop
 
     /* ── Mobile Find Routes button ───────────────────────── */
     $("mob-btn-find").addEventListener("click", () => {
       closeSheet();
-      $("btn-find").click();
+      // Small delay so sheet closes before route search starts
+      setTimeout(() => $("btn-find").click(), 100);
     });
 
     /* ── Mobile Reset button ─────────────────────────────── */
