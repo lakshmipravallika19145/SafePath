@@ -151,55 +151,52 @@
     if(!navigator.geolocation){setStatus("Geolocation not supported. Enter location manually.");return;}
     if(state.watchId!==null){try{navigator.geolocation.clearWatch(state.watchId);}catch(_){}state.watchId=null;}
 
-    function onSuccess(pos){
+    let gotFirstFix=false;
+
+    function applyPosition(pos){
       const{latitude:lat,longitude:lng}=pos.coords;
+      gotFirstFix=true;
       if(!state.start||state.start.label==="Current Location"){
         state.start={lat,lng,label:"Current Location"};
         ui.inputStart.value="Current Location";
-        setStartMarker([lat,lng],"Start: Current Location");
+        setStartMarker([lat,lng],"📍 Current Location");
         const mobInp=document.getElementById("mob-input-start");
-        if(mobInp)mobInp.value="Current Location";
+        if(mobInp)mobInp.value="📍 Current Location";
+        setStatus("✅ Live location detected.");
       }
       if(state.navigating&&state.nav.active)updateNavigation(lat,lng,pos.coords.speed);
     }
 
-    function onError(err){
-      // err.code: 1=PERMISSION_DENIED, 2=POSITION_UNAVAILABLE, 3=TIMEOUT
-      if(err.code===1){
-        // Only show popup for actual permission denial
-        setStatus("Location permission denied. Enter location manually.");
-        document.dispatchEvent(new CustomEvent("sp:locationDenied"));
-      } else if(err.code===3){
-        // Timeout — try again with low accuracy fallback, don't show popup
-        setStatus("Getting location…");
-        navigator.geolocation.getCurrentPosition(onSuccess, onErrorFallback,
-          {enableHighAccuracy:false,timeout:15000,maximumAge:60000});
-      } else {
-        // Position unavailable (err.code===2) — try low accuracy silently
-        navigator.geolocation.getCurrentPosition(onSuccess, onErrorFallback,
-          {enableHighAccuracy:false,timeout:15000,maximumAge:60000});
-      }
+    function onPermDenied(){
+      setStatus("Location permission denied. Enter start location manually.");
+      document.dispatchEvent(new CustomEvent("sp:locationDenied"));
     }
 
-    function onErrorFallback(err){
-      if(err.code===1){
-        setStatus("Location permission denied. Enter location manually.");
-        document.dispatchEvent(new CustomEvent("sp:locationDenied"));
-      } else {
-        // Not denied — just unavailable. Don't show popup, let user type manually.
-        setStatus("Location unavailable. Enter start location manually.");
-      }
-    }
+    // ── STEP 1: Instant coarse fix (WiFi + cell towers, like Google Maps does first)
+    // enableHighAccuracy:false uses network-based location — available in <1 second
+    navigator.geolocation.getCurrentPosition(
+      applyPosition,
+      err=>{
+        if(err.code===1){ onPermDenied(); return; }
+        // If coarse also fails, try once more with anything available
+        navigator.geolocation.getCurrentPosition(applyPosition, err2=>{
+          if(err2.code===1) onPermDenied();
+          // codes 2 & 3: silently let user type — no popup, no scary message
+        },{enableHighAccuracy:false,timeout:20000,maximumAge:120000});
+      },
+      {enableHighAccuracy:false, timeout:5000, maximumAge:30000}
+    );
 
-    // First do a one-shot getCurrentPosition so we get a result faster
-    navigator.geolocation.getCurrentPosition(onSuccess, onError,
-      {enableHighAccuracy:true, timeout:10000, maximumAge:5000});
-
-    // Then start watchPosition for live tracking during navigation
-    state.watchId=navigator.geolocation.watchPosition(onSuccess, err=>{
-      // Suppress watch errors silently — getCurrentPosition already handled it
-      if(err.code===1)document.dispatchEvent(new CustomEvent("sp:locationDenied"));
-    }, {enableHighAccuracy:true,timeout:20000,maximumAge:3000});
+    // ── STEP 2: Simultaneously start GPS watch for precise + live tracking
+    // This runs in parallel — will refine position once GPS locks (like Google Maps does)
+    state.watchId=navigator.geolocation.watchPosition(
+      applyPosition,
+      err=>{
+        // Only fire denied event — timeout/unavailable are normal during GPS warm-up
+        if(err.code===1) onPermDenied();
+      },
+      {enableHighAccuracy:true, timeout:30000, maximumAge:2000}
+    );
   }
 
   let startAbort=null,endAbort=null;
