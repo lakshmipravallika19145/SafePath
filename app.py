@@ -25,7 +25,7 @@ SAFETY_POINTS_PATH = DATA_DIR / "safety_points.json"
 USER_REPORTS_PATH  = DATA_DIR / "user_reports.jsonl"
 
 MSG91_API_KEY   = os.getenv("MSG91_API_KEY",   "501984ANen7Xhbtj69bd9eeeP1")
-MSG91_SENDER_ID = os.getenv("MSG91_SENDER_ID", "SAFERT")
+MSG91_SENDER_ID = os.getenv("MSG91_SENDER_ID", "india")
 TOMTOM_API_KEY  = os.getenv("TOMTOM_API_KEY",  "OfDU2Qgiw5VbIld0HdbAaJ9xNnWYTE0w")
 
 _ROUTES_CACHE:  dict = {}
@@ -53,11 +53,19 @@ def _build_db_uri():
     db_user = os.getenv("DB_USER")
     db_pass = os.getenv("DB_PASSWORD")
     db_name = os.getenv("DB_NAME")
+    db_port = os.getenv("DB_PORT", "20477")
     if db_host and db_user and db_pass and db_name:
         try:
             import pymysql
             encoded_pass = urllib.parse.quote_plus(db_pass)
-            return f"mysql+pymysql://{db_user}:{encoded_pass}@{db_host}/{db_name}"
+            return (
+                f"mysql+pymysql://{db_user}:{encoded_pass}"
+                f"@{db_host}:{db_port}/{db_name}"
+                f"?charset=utf8mb4"
+                f"&ssl_ca=/etc/ssl/certs/ca-certificates.crt"
+                f"&ssl_check_hostname=false"
+                f"&ssl_verify_cert=false"
+            )
         except ImportError:
             pass
     try:
@@ -66,6 +74,7 @@ def _build_db_uri():
     except ImportError:
         pass
     return f"sqlite:///{BASE_DIR / 'saferoute.db'}"
+
 
 
 # ══════════════════════════════════════════════════════════════
@@ -580,8 +589,13 @@ def create_app():
     db.init_app(app)
 
     with app.app_context():
-        _migrate_tables(db.engine)   # add missing columns first
-        db.create_all()              # create any brand-new tables
+        try:
+            _migrate_tables(db.engine)
+            db.create_all()
+            print("[DB] ✅ Connected and tables ready")
+        except Exception as e:
+            print(f"[DB] ⚠️ Could not connect on startup: {e}")
+            print("[DB] App will start anyway, DB operations will retry on request")           # create any brand-new tables
 
     CORS(app)
 
