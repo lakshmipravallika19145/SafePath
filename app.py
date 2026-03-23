@@ -170,8 +170,6 @@ class EmergencyContact(db.Model):
 # ══════════════════════════════════════════════════════════════
 
 def _migrate_tables(engine):
-    """Add any missing columns to the users table without losing existing data."""
-    # Columns to add: (column_name, ALTER TABLE SQL)
     user_columns = [
         ("email",         "ALTER TABLE users ADD COLUMN email         VARCHAR(150)  DEFAULT NULL"),
         ("password_hash", "ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)  NOT NULL DEFAULT ''"),
@@ -180,29 +178,26 @@ def _migrate_tables(engine):
         ("contact3",      "ALTER TABLE users ADD COLUMN contact3      VARCHAR(15)   DEFAULT NULL"),
         ("updated_at",    "ALTER TABLE users ADD COLUMN updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"),
     ]
-
-    with engine.connect() as conn:
-        # Check if users table exists at all
-        try:
-            result = conn.execute(db.text("SHOW COLUMNS FROM users"))
-            existing_cols = {row[0].lower() for row in result}
-        except Exception:
-            # Table doesn't exist yet — db.create_all() will create it fresh
-            print("[Migration] users table not found, will be created by db.create_all()")
-            return
-
-        # Add each missing column
-        for col_name, alter_sql in user_columns:
-            if col_name.lower() not in existing_cols:
-                try:
-                    conn.execute(db.text(alter_sql))
-                    conn.commit()
-                    print(f"[Migration] ✅ Added column: users.{col_name}")
-                except Exception as e:
-                    print(f"[Migration] ⚠️  Could not add {col_name}: {e}")
-            else:
-                print(f"[Migration] ✓ Column already exists: users.{col_name}")
-
+    try:
+        with engine.connect() as conn:
+            try:
+                result = conn.execute(db.text("SHOW COLUMNS FROM users"))
+                existing_cols = {row[0].lower() for row in result}
+            except Exception:
+                print("[Migration] users table not found, will be created by db.create_all()")
+                return
+            for col_name, alter_sql in user_columns:
+                if col_name.lower() not in existing_cols:
+                    try:
+                        conn.execute(db.text(alter_sql))
+                        conn.commit()
+                        print(f"[Migration] ✅ Added column: users.{col_name}")
+                    except Exception as e:
+                        print(f"[Migration] ⚠️ Could not add {col_name}: {e}")
+                else:
+                    print(f"[Migration] ✓ Column already exists: users.{col_name}")
+    except Exception as e:
+        print(f"[Migration] ⚠️ Skipping migration, DB not reachable: {e}")
 
 # ══════════════════════════════════════════════════════════════
 # Generic helpers
