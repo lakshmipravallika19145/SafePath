@@ -217,8 +217,15 @@
           not just permission-denied errors (code 1).
   ══════════════════════════════════════════════════════════ */
   function detectLiveLocation(){
+    const secureCtx = window.isSecureContext || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    if(!secureCtx){
+      setStatus("Location requires HTTPS on mobile. Open the secure Render URL.");
+      showLocationButton();
+      return;
+    }
+
     if(!navigator.geolocation){
-      setStatus("Geolocation not supported. Enter location manually.");
+      setStatus("Geolocation not supported on this browser. Enter location manually.");
       showLocationButton();
       return;
     }
@@ -239,6 +246,16 @@
     function onDenied(){
       setStatus("📍 Location denied. Enter start location manually.");
       document.dispatchEvent(new CustomEvent("sp:locationDenied"));
+    }
+
+    // Probe permission state when supported (helps on mobile browsers that
+    // start as "prompt" and never show a native prompt automatically).
+    if (navigator.permissions && navigator.permissions.query) {
+      navigator.permissions.query({ name: "geolocation" })
+        .then(p => {
+          if (p.state === "denied") onDenied();
+        })
+        .catch(() => {});
     }
 
     /* ── STEP 1: Fast coarse fix via WiFi/cell towers
@@ -317,6 +334,10 @@
     ].join(";");
 
     btn.addEventListener("click", ()=>{
+      if(!navigator.geolocation){
+        setStatus("Geolocation not supported on this browser.");
+        return;
+      }
       btn.innerHTML = "📍 Detecting…";
       btn.disabled = true;
 

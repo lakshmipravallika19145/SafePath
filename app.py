@@ -577,6 +577,14 @@ def create_app():
 
     CORS(app)
 
+    @app.after_request
+    def add_security_headers(resp):
+        # Mobile browsers can block geolocation if policy headers are missing
+        # (especially in embedded/in-app browser contexts).
+        resp.headers.setdefault("Permissions-Policy", "geolocation=(self)")
+        resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        return resp
+
     @app.route("/")
     def home():
         return render_template("dashboard.html")
