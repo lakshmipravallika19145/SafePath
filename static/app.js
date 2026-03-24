@@ -50,7 +50,7 @@
   };
 
   let lastNavPos=null,lastNavTime=null;
-  function setStatus(msg){ui.status.textContent=msg;}
+  function setStatus(msg){if(ui.status)ui.status.textContent=msg;}
 
   /* Map */
   const map=new maplibregl.Map({
@@ -101,26 +101,53 @@
   }
   function fitToStartEnd(){if(!state.start||!state.end)return;map.fitBounds([[state.start.lng,state.start.lat],[state.end.lng,state.end.lat]],{padding:80,duration:400});}
 
+  // ── Apply a GPS position to state + map ──────────────────
+  function applyPosition(lat, lng, speed){
+    if(!state.start||state.start.label==="Current Location"){
+      state.start={lat,lng,label:"Current Location"};
+      // Update both desktop and mobile inputs
+      const desktopInp=$("input-current");
+      const mobileInp=$("mob-input-start");
+      if(desktopInp) desktopInp.value="📍 Current Location";
+      if(mobileInp)  mobileInp.value="📍 Current Location";
+      setStartMarker([lat,lng],"📍 Current Location");
+      setStatus("✅ Live location detected.");
+      map.flyTo({center:[lng,lat],zoom:14,duration:600});
+    }
+    if(state.navigating&&state.nav.active) updateNavigation(lat,lng,speed);
+  }
+
   map.on("load",()=>{
-    // Session check is handled by the auth script in dashboard.html (server-side /api/me)
-    // No localStorage needed here
-    // Handle location granted from mobile popup
-    document.addEventListener("sp:locationGranted", e => {
-      const {lat, lng} = e.detail;
-      state.start = {lat, lng, label:"Current Location"};
-      const inp = document.getElementById("input-current");
-      if (inp) inp.value = "Current Location";
-      const mobInp = document.getElementById("mob-input-start");
-      if (mobInp) mobInp.value = "Current Location";
-      setStartMarker([lat, lng], "Start: Current Location");
+    document.addEventListener("sp:locationGranted",e=>{
+      const{lat,lng}=e.detail;
+      applyPosition(lat,lng,null);
     });
 
     map.on("click",e=>{
       state.lastClick={lat:e.lngLat.lat,lng:e.lngLat.lng};
-      if(!state.start){state.start={lat:e.lngLat.lat,lng:e.lngLat.lng,label:"Start (map click)"};ui.inputStart.value="Current Location (map click)";setStartMarker([e.lngLat.lat,e.lngLat.lng],"Start");}
-      else if(!state.end){state.end={lat:e.lngLat.lat,lng:e.lngLat.lng,label:"Destination (map click)"};ui.inputEnd.value="Destination (map click)";setEndMarker([e.lngLat.lat,e.lngLat.lng],"Destination");fitToStartEnd();}
+      if(!state.start){
+        state.start={lat:e.lngLat.lat,lng:e.lngLat.lng,label:"Start (map click)"};
+        ui.inputStart.value="Current Location (map click)";
+        setStartMarker([e.lngLat.lat,e.lngLat.lng],"Start");
+      } else if(!state.end){
+        state.end={lat:e.lngLat.lat,lng:e.lngLat.lng,label:"Destination (map click)"};
+        ui.inputEnd.value="Destination (map click)";
+        setEndMarker([e.lngLat.lat,e.lngLat.lng],"Destination");
+        fitToStartEnd();
+      }
     });
-    (async function boot(){try{setStatus("Loading safety dataset…");await loadSafetyPoints();setStatus("Ready. Detecting live location…");detectLiveLocation();}catch(e){setStatus("Failed to initialize.");}})();
+
+    (async function boot(){
+      try{
+        setStatus("Loading safety dataset…");
+        await loadSafetyPoints();
+        setStatus("Ready. Detecting live location…");
+        detectLiveLocation();
+      }catch(e){
+        setStatus("Failed to initialize.");
+        console.error(e);
+      }
+    })();
   });
 
   function safetyPctPt(p){
@@ -150,93 +177,150 @@
     map.addLayer({id:hmLyr,type:"heatmap",source:hmSrc,maxzoom:17,paint:{"heatmap-weight":["get","intensity"],"heatmap-intensity":1,"heatmap-color":["interpolate",["linear"],["heatmap-density"],0,"rgba(0,0,0,0)",0.2,"rgba(255,77,109,0.3)",0.5,"rgba(255,211,90,0.5)",0.8,"rgba(41,255,154,0.6)",1,"rgba(108,246,255,0.8)"],"heatmap-radius":28,"heatmap-opacity":state.heatEnabled?0.7:0}},spClust);
   }
 
+  // ══════════════════════════════════════════════════════════
+  // detectLiveLocation — works on both mobile and desktop
+  // Key fix: uses a user-gesture triggered approach on mobile
+  // since iOS/Android block geolocation without user interaction
+  // ══════════════════════════════════════════════════════════
   function detectLiveLocation(){
-    if(!navigator.geolocation){setStatus("Geolocation not supported. Enter location manually.");return;}
-    if(state.watchId!==null){try{navigator.geolocation.clearWatch(state.watchId);}catch(_){}state.watchId=null;}
-
-    let gotFirstFix=false;
-
-    function applyPosition(pos){
-      const{latitude:lat,longitude:lng}=pos.coords;
-      gotFirstFix=true;
-      if(!state.start||state.start.label==="Current Location"){
-        state.start={lat,lng,label:"Current Location"};
-        ui.inputStart.value="Current Location";
-        setStartMarker([lat,lng],"📍 Current Location");
-        const mobInp=document.getElementById("mob-input-start");
-        if(mobInp)mobInp.value="📍 Current Location";
-        setStatus("✅ Live location detected.");
-      }
-      if(state.navigating&&state.nav.active)updateNavigation(lat,lng,pos.coords.speed);
+    if(!navigator.geolocation){
+      setStatus("Geolocation not supported. Enter location manually.");
+      return;
     }
 
-    function onPermDenied(){
-      setStatus("Location permission denied. Enter start location manually.");
+    // Clear any existing watch
+    if(state.watchId!==null){
+      try{navigator.geolocation.clearWatch(state.watchId);}catch(_){}
+      state.watchId=null;
+    }
+
+    function onDenied(){
+      setStatus("📍 Location denied. Enter start location manually.");
       document.dispatchEvent(new CustomEvent("sp:locationDenied"));
     }
 
-    // ── STEP 1: Instant coarse fix (WiFi + cell towers, like Google Maps does first)
-    // enableHighAccuracy:false uses network-based location — available in <1 second
+    function onSuccess(pos){
+      applyPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.speed);
+    }
+
+    function onError(err){
+      if(err.code===1){ onDenied(); return; }
+      // timeout or unavailable — silent, user can type manually
+      setStatus("📍 Tap map or type your start location.");
+    }
+
+    // ── Step 1: Fast coarse fix (WiFi/cell — works instantly on mobile)
     navigator.geolocation.getCurrentPosition(
-      applyPosition,
+      onSuccess,
       err=>{
-        if(err.code===1){ onPermDenied(); return; }
-        // If coarse also fails, try once more with anything available
-        navigator.geolocation.getCurrentPosition(applyPosition, err2=>{
-          if(err2.code===1) onPermDenied();
-          // codes 2 & 3: silently let user type — no popup, no scary message
-        },{enableHighAccuracy:false,timeout:20000,maximumAge:120000});
+        if(err.code===1){ onDenied(); return; }
+        // Try once more with relaxed settings
+        navigator.geolocation.getCurrentPosition(
+          onSuccess,
+          onError,
+          {enableHighAccuracy:false, timeout:20000, maximumAge:120000}
+        );
       },
-      {enableHighAccuracy:false, timeout:5000, maximumAge:30000}
+      {enableHighAccuracy:false, timeout:8000, maximumAge:30000}
     );
 
-    // ── STEP 2: Simultaneously start GPS watch for precise + live tracking
-    // This runs in parallel — will refine position once GPS locks (like Google Maps does)
-    state.watchId=navigator.geolocation.watchPosition(
-      applyPosition,
-      err=>{
-        // Only fire denied event — timeout/unavailable are normal during GPS warm-up
-        if(err.code===1) onPermDenied();
-      },
-      {enableHighAccuracy:true, timeout:30000, maximumAge:2000}
+    // ── Step 2: Precise GPS watch (refines position over time)
+    // maximumAge:0 forces fresh GPS on mobile (critical fix)
+    // timeout:60000 gives mobile GPS time to acquire satellite lock
+    state.watchId = navigator.geolocation.watchPosition(
+      onSuccess,
+      err=>{ if(err.code===1) onDenied(); },
+      {enableHighAccuracy:true, timeout:60000, maximumAge:0}
     );
+  }
+
+  // ── On mobile, location requires a user gesture (tap) on some browsers
+  // This button appears if auto-detect fails
+  function showLocationButton(){
+    const existing=$("btn-locate-me");
+    if(existing) return;
+    const btn=document.createElement("button");
+    btn.id="btn-locate-me";
+    btn.textContent="📍 Detect My Location";
+    btn.style.cssText="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:999;background:#20e37f;color:#05060b;border:none;border-radius:20px;padding:10px 20px;font-weight:700;font-size:0.9rem;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.3);";
+    btn.addEventListener("click",()=>{
+      btn.textContent="📍 Detecting…";
+      btn.disabled=true;
+      navigator.geolocation.getCurrentPosition(
+        pos=>{
+          applyPosition(pos.coords.latitude,pos.coords.longitude,pos.coords.speed);
+          btn.remove();
+          // Start watch after user gesture
+          if(state.watchId!==null){try{navigator.geolocation.clearWatch(state.watchId);}catch(_){}}
+          state.watchId=navigator.geolocation.watchPosition(
+            p=>applyPosition(p.coords.latitude,p.coords.longitude,p.coords.speed),
+            err=>{ if(err.code===1) btn.remove(); },
+            {enableHighAccuracy:true,timeout:60000,maximumAge:0}
+          );
+        },
+        err=>{
+          btn.textContent="📍 Detect My Location";
+          btn.disabled=false;
+          if(err.code===1){
+            setStatus("Location denied. Enter start location manually.");
+            btn.remove();
+          }
+        },
+        {enableHighAccuracy:true,timeout:15000,maximumAge:0}
+      );
+    });
+    document.body.appendChild(btn);
+  }
+
+  // Show location button on mobile after 4 seconds if no location detected
+  if(/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)){
+    setTimeout(()=>{
+      if(!state.start){ showLocationButton(); }
+    },4000);
   }
 
   let startAbort=null,endAbort=null;
   async function fetchSuggestions(q,ctrl){
-    // Call Nominatim directly from browser (server-side calls get 403 blocked by Nominatim on cloud IPs)
     const params=new URLSearchParams({format:"json",q,limit:"8",addressdetails:"1",namedetails:"1",countrycodes:"in","accept-language":"en"});
     if(state.start?.lat){params.set("viewbox",`${state.start.lng-0.5},${state.start.lat+0.5},${state.start.lng+0.5},${state.start.lat-0.5}`);}
     const res=await fetch("https://nominatim.openstreetmap.org/search?"+params,{signal:ctrl.signal,headers:{"Accept-Language":"en"}});
     const data=await res.json();
     return{results:data.map(item=>({display_name:item.display_name,name:(item.namedetails?.name||(item.display_name||"").split(",")[0].trim()),lat:parseFloat(item.lat),lng:parseFloat(item.lon),type:item.type,class:item.class}))};
   }
+
   function renderSuggestions(container,payload,onPick){
     container.innerHTML="";const results=payload?.results||[];if(!results.length){container.classList.remove("suggest--open");return;}
     if(payload?.message){const m=document.createElement("div");m.className="suggest__msg";m.textContent=payload.message;container.appendChild(m);}
     results.forEach(item=>{const row=document.createElement("button");row.type="button";row.className="suggest__item";row.innerHTML=`<div class="suggest__name">${item.name||(item.display_name||"").split(",")[0]}</div><div class="suggest__meta">${item.display_name||""}</div>`;row.addEventListener("click",()=>onPick(item));container.appendChild(row);});
     container.classList.add("suggest--open");
   }
-  const debouncedStartSuggest=debounce(async()=>{const q=ui.inputStart.value.trim();if(q.length<2){renderSuggestions(ui.sugStart,{results:[]},()=>{});return;}if(startAbort)startAbort.abort();startAbort=new AbortController();try{const p=await fetchSuggestions(q,startAbort);renderSuggestions(ui.sugStart,p,item=>{ui.inputStart.value=item.display_name;state.start={lat:item.lat,lng:item.lng,label:item.display_name};setStartMarker([item.lat,item.lng],"Start");renderSuggestions(ui.sugStart,{results:[]},()=>{});map.flyTo({center:[item.lng,item.lat],zoom:Math.max(14,map.getZoom())});fitToStartEnd();});}catch(_){}},300);
+
+  const debouncedStartSuggest=debounce(async()=>{const q=ui.inputStart.value.trim();if(q.length<2){renderSuggestions(ui.sugStart,{results:[]},()=>{});return;}if(startAbort)startAbort.abort();startAbort=new AbortController();try{const p=await fetchSuggestions(q,startAbort);renderSuggestions(ui.sugStart,p,item=>{ui.inputStart.value=item.display_name;state.start={lat:item.lat,lng:item.lng,label:item.display_name};setStartMarker([item.lat,item.lng],"Start");renderSuggestions(ui.sugStart,{results:[]},()=>{});map.flyTo({center:[item.lng,item.lat],zoom:Math.max(14,map.getZoom())});fitToStartEnd();const btn=$("btn-locate-me");if(btn)btn.remove();});}catch(_){}},300);
   const debouncedEndSuggest=debounce(async()=>{const q=ui.inputEnd.value.trim();if(q.length<2){renderSuggestions(ui.sugEnd,{results:[]},()=>{});return;}if(endAbort)endAbort.abort();endAbort=new AbortController();try{const p=await fetchSuggestions(q,endAbort);renderSuggestions(ui.sugEnd,p,item=>{ui.inputEnd.value=item.display_name;state.end={lat:item.lat,lng:item.lng,label:item.display_name};setEndMarker([item.lat,item.lng],"Destination");renderSuggestions(ui.sugEnd,{results:[]},()=>{});map.flyTo({center:[item.lng,item.lat],zoom:Math.max(14,map.getZoom())});fitToStartEnd();});}catch(_){}},300);
-  document.addEventListener("click",e=>{if(!e.target.closest?.("#start-wrap")&&!e.target.closest?.("#dest-wrap")){ui.sugStart.classList.remove("suggest--open");ui.sugEnd.classList.remove("suggest--open");}});
-  // Attach input listeners to whichever inputs are active (mobile or desktop)
+
+  document.addEventListener("click",e=>{
+    if(!e.target.closest?.("#start-wrap")&&!e.target.closest?.("#dest-wrap")&&
+       !e.target.closest?.("#mob-start-wrap")&&!e.target.closest?.("#mob-dest-wrap")){
+      ui.sugStart.classList.remove("suggest--open");
+      ui.sugEnd.classList.remove("suggest--open");
+    }
+  });
+
   function attachInputListeners(){
     const inpS=ui.inputStart, inpE=ui.inputEnd;
     inpS.addEventListener("input",debouncedStartSuggest);
     inpE.addEventListener("input",debouncedEndSuggest);
     inpS.addEventListener("input",()=>{if(state.start&&inpS.value.trim()!==(state.start.label||"").trim()){state.start=null;startMarker?.remove();startMarker=null;}});
     inpE.addEventListener("input",()=>{if(state.end&&inpE.value.trim()!==(state.end.label||"").trim()){state.end=null;endMarker?.remove();endMarker=null;}});
-    // Also attach to the hidden desktop inputs on mobile so nothing breaks
     if(isMobile()){
-      const ds=$("input-current"), de=$("input-dest");
+      const ds=$("input-current"),de=$("input-dest");
       if(ds&&ds!==inpS){ds.addEventListener("input",debouncedStartSuggest);}
       if(de&&de!==inpE){de.addEventListener("input",debouncedEndSuggest);}
     }
   }
   attachInputListeners();
 
-  function buildWeights(){const on=id=>$(id).checked;return{street_lighting:on("t-light")?0.25:0.05,crowd_density:on("t-crowd")?0.15:0.05,police_proximity:on("t-police")?0.10:0.03,cctv_coverage:on("t-cctv")?0.10:0.03,road_visibility:0.10,traffic_density:0.10,crime_rate:on("t-crime")?0.15:0.08,incident_reports:0.05};}
+  function buildWeights(){const on=id=>$(id)&&$(id).checked;return{street_lighting:on("t-light")?0.25:0.05,crowd_density:on("t-crowd")?0.15:0.05,police_proximity:on("t-police")?0.10:0.03,cctv_coverage:on("t-cctv")?0.10:0.03,road_visibility:0.10,traffic_density:0.10,crime_rate:on("t-crime")?0.15:0.08,incident_reports:0.05};}
 
   function buildLabeledRoutes(routes){
     if(!routes?.length)return[];
@@ -249,7 +333,15 @@
     return[{key:"Safest Route",route:s},{key:"Balanced Route",route:b},{key:"Fastest Route",route:f}];
   }
 
-  async function geocodeAddress(q){try{const params=new URLSearchParams({format:"json",q,limit:"1",addressdetails:"1",countrycodes:"in","accept-language":"en"});const res=await fetch("https://nominatim.openstreetmap.org/search?"+params,{headers:{"Accept-Language":"en"}});const data=await res.json();if(!data?.length)return null;return{lat:parseFloat(data[0].lat),lng:parseFloat(data[0].lon),display_name:data[0].display_name};}catch(_){return null;}}
+  async function geocodeAddress(q){
+    try{
+      const params=new URLSearchParams({format:"json",q,limit:"1",addressdetails:"1",countrycodes:"in","accept-language":"en"});
+      const res=await fetch("https://nominatim.openstreetmap.org/search?"+params,{headers:{"Accept-Language":"en"}});
+      const data=await res.json();
+      if(!data?.length)return null;
+      return{lat:parseFloat(data[0].lat),lng:parseFloat(data[0].lon),display_name:data[0].display_name};
+    }catch(_){return null;}
+  }
 
   async function fetchRoutesAndScores(){
     const si=ui.inputStart.value.trim(),ei=ui.inputEnd.value.trim();
