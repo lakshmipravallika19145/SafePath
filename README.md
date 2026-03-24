@@ -230,3 +230,4 @@ This is a Flask app built to ensure women safety at night, we have built this ap
 - The `data/user_data` folder exists to store user-specific data (e.g. account details, usage logs, preferences).
 - This folder is not required to be pushed to GitHub for code updates, as it contains runtime/user-generated data.
 - The tracked JSON files under `data/` such as `safety_points.json` and `user_reports.jsonl` are still maintained in the repo.
+DEPLOYED LINK : https://safepath-5.onrender.com/
