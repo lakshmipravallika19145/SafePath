@@ -345,7 +345,6 @@
         </div>
         <div class="map-top__right">
           <button id="btn-heat"          class="btn btn--ghost">Toggle Heatmap</button>
-          <button id="btn-report"        class="btn btn--ghost">Report at last click</button>
         </div>
       </div>
       <div class="map-frame">
@@ -373,7 +372,11 @@
       </div>
       <div class="section">
         <div class="section__title">Quick Report</div>
-        <label class="field"><span class="field__label">Place name</span><input id="report-place" class="field__input" placeholder="e.g., MG Road lane" /></label>
+        <label class="field" id="report-wrap">
+          <span class="field__label">Place name</span>
+          <input id="report-place" class="field__input" placeholder="e.g., MG Road lane" autocomplete="off" />
+          <div id="suggest-report" class="suggest"></div>
+        </label>
         <label class="field"><span class="field__label">Description</span><input id="report-desc"  class="field__input" placeholder="e.g., Poor lighting" /></label>
         <label class="field">
           <span class="field__label">Safety rating</span>

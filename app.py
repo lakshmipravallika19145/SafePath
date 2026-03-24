@@ -145,6 +145,29 @@ class EmergencyContact(db.Model):
     phone        = db.Column(db.String(15),  nullable=False)
     created_at   = db.Column(db.DateTime,    server_default=db.func.now())
 
+class Report(db.Model):
+    __tablename__ = "reports"
+    id          = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id     = db.Column(db.Integer, nullable=True)
+    place_name  = db.Column(db.String(120), nullable=True)
+    description = db.Column(db.String(300), nullable=True)
+    rating      = db.Column(db.Integer, nullable=True)
+    lat         = db.Column(db.Float, nullable=False)
+    lng         = db.Column(db.Float, nullable=False)
+    created_at  = db.Column(db.DateTime, server_default=db.func.now())
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "place_name": self.place_name or "",
+            "description": self.description or "",
+            "rating": self.rating,
+            "lat": float(self.lat),
+            "lng": float(self.lng),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
 
 # ══════════════════════════════════════════════════════════════
 # Auto-migration: safely add missing columns to existing tables
@@ -554,6 +577,59 @@ def _route_safety_score(nearby,fallback_points=None):
     if v is not None: return v
     return 50.0
 
+def _recent_reports_near(lat, lng, radius_m=500.0, limit=10):
+    try:
+        approx_deg = max(0.001, float(radius_m) / 111_320.0)
+        rows = (Report.query
+                .filter(Report.lat.between(lat - approx_deg, lat + approx_deg))
+                .filter(Report.lng.between(lng - approx_deg, lng + approx_deg))
+                .order_by(Report.created_at.desc())
+                .limit(200)
+                .all())
+        hits = []
+        for r in rows:
+            d = _haversine_m(lat, lng, float(r.lat), float(r.lng))
+            if d <= radius_m:
+                item = r.to_dict()
+                if r.user_id:
+                    u = User.query.get(r.user_id)
+                    if u:
+                        item["reporter_name"] = u.name
+                item["distance_m"] = round(d, 1)
+                hits.append(item)
+        hits.sort(key=lambda x: x.get("distance_m", 999999))
+        return hits[:limit]
+    except Exception:
+        return []
+
+def _top_repeated_complaints_near(lat, lng, exclude_user_id=None, radius_m=500.0, limit=3):
+    try:
+        approx_deg = max(0.001, float(radius_m) / 111_320.0)
+        rows = (Report.query
+                .filter(Report.lat.between(lat - approx_deg, lat + approx_deg))
+                .filter(Report.lng.between(lng - approx_deg, lng + approx_deg))
+                .order_by(Report.created_at.desc())
+                .limit(300)
+                .all())
+        counts = {}
+        labels = {}
+        for r in rows:
+            if exclude_user_id and r.user_id == exclude_user_id:
+                continue
+            d = _haversine_m(lat, lng, float(r.lat), float(r.lng))
+            if d > radius_m:
+                continue
+            txt = (r.description or "").strip()
+            if not txt:
+                continue
+            k = txt.lower()
+            counts[k] = counts.get(k, 0) + 1
+            labels.setdefault(k, txt)
+        ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+        return [{"complaint": labels[k], "count": c} for k, c in ranked]
+    except Exception:
+        return []
+
 
 # ══════════════════════════════════════════════════════════════
 # Flask factory
@@ -830,9 +906,19 @@ def create_app():
             if idx not in seen:
                 r=dict(scored[idx]); r["route_label"]="Route"; r.pop("_bal",None); final_routes.append(r)
         top=final_routes[0]
+        uid = session.get("user_id")
+        destination_reports = _recent_reports_near(e_lat, e_lng, radius_m=500.0, limit=8)
+        top_complaints = _top_repeated_complaints_near(e_lat, e_lng, exclude_user_id=uid, radius_m=500.0, limit=3)
+        warning_msg = None
+        if destination_reports or top_complaints:
+            warning_msg = (f"⚠️ {len(destination_reports)} previous user report(s) found "
+                           f"within 500m of your destination. Please stay alert.")
         return jsonify({"routes":final_routes,
             "ai_recommendation":f"SafePath recommends the {top['route_label']} ({top['route_score']}% safe, ~{round(top['duration_s']/60)} min by car).",
-            "source":"osrm" if osrm_ok else "fallback","count":len(final_routes)})
+            "source":"osrm" if osrm_ok else "fallback","count":len(final_routes),
+            "destination_reports": destination_reports,
+            "destination_warning": warning_msg,
+            "top_destination_complaints": top_complaints})
 
     @app.route("/api/geocode")
     def geocode():
@@ -903,13 +989,31 @@ def create_app():
         payload=request.get_json(silent=True) or {}
         lat=payload.get("lat"); lng=payload.get("lng")
         if lat is None or lng is None: return jsonify({"error":"lat and lng required"}),400
+        uid = session.get("user_id")
+        if not uid:
+            return jsonify({"error":"Please log in to submit report"}),401
         record={"id":f"rep_{int(datetime.now(tz=timezone.utc).timestamp()*1000)}",
             "created_at":datetime.now(tz=timezone.utc).isoformat(),"lat":float(lat),"lng":float(lng),
             "place_name":(payload.get("place_name") or "").strip()[:120],
             "description":(payload.get("description") or "").strip()[:300],
             "rating":int(payload["rating"]) if payload.get("rating") else None}
-        _append_jsonl(USER_REPORTS_PATH,record)
-        return jsonify({"ok":True,"report":record})
+        try:
+            db_report = Report(
+                user_id=uid,
+                place_name=record["place_name"] or None,
+                description=record["description"] or None,
+                rating=record["rating"],
+                lat=record["lat"],
+                lng=record["lng"],
+            )
+            db.session.add(db_report)
+            db.session.commit()
+            out = db_report.to_dict()
+            out["reporter_name"] = session.get("user_name")
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": f"Could not save report: {str(e)}"}), 500
+        return jsonify({"ok":True,"report":out})
 
     @app.route("/api/score_route", methods=["POST"])
     def score_route():
