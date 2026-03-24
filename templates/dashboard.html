@@ -590,8 +590,17 @@
           }));
         },
         err => {
-          if (err.code === 1) showLocPopup(); // only re-show if still denied
-          // timeout/unavailable — just let them type manually, no popup
+          if (err.code === 1) { showLocPopup(); return; }
+          // Try once more with high accuracy as user has tapped retry.
+          navigator.geolocation.getCurrentPosition(
+            pos2 => {
+              document.dispatchEvent(new CustomEvent("sp:locationGranted", {
+                detail: { lat: pos2.coords.latitude, lng: pos2.coords.longitude }
+              }));
+            },
+            () => { showLocPopup(); },
+            { enableHighAccuracy: true, timeout: 18000, maximumAge: 30000 }
+          );
         },
         { enableHighAccuracy: false, timeout: 12000, maximumAge: 30000 }
       );
@@ -600,6 +609,8 @@
 
     // Only show popup for actual PERMISSION_DENIED (fired from app.js with err.code===1)
     document.addEventListener("sp:locationDenied", showLocPopup);
+    // Also show popup for position-unavailable/timeouts on mobile
+    document.addEventListener("sp:locationUnavailable", showLocPopup);
 
     /* ── Mobile status mirror ────────────────────────────── */
     const desktopStatus = $("status");

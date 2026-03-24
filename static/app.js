@@ -29,7 +29,7 @@
     start:null,end:null,lastClick:null,heatEnabled:true,
     routes:[],aiBest:null,selectedRouteKey:"Safest Route",
     navigating:false,watchId:null,
-    nav:{active:null,coordsLatLng:[],cumDistM:[],startedAtMs:null,lastRerouteAtMs:0,traveledIdx:0,arrivedFired:false},
+    nav:{active:null,coordsLatLng:[],cumDistM:[],startedAtMs:null,lastRerouteAtMs:0,traveledIdx:0,arrivedFired:false,lastFollowMs:0},
   };
 
   const isMobile=()=>window.innerWidth<=760;
@@ -92,6 +92,7 @@
 
   let startMarker=null,endMarker=null,navDot=null;
   let routeSrcIds=[],routeLyrIds=[],arrowLyr="route-arrows";
+  const navRemainingSrc="route-remaining",navRemainingLyr="route-remaining-layer";
   const hmSrc="safety-heatmap",hmLyr="safety-heatmap-layer";
   const spSrc="safety-points",spClust="safety-clusters",spPts="safety-points-layer",spCnt="safety-cluster-count";
 
@@ -114,6 +115,7 @@
     routeLyrIds.forEach(id=>{if(map.getLayer(id))map.removeLayer(id);});routeLyrIds=[];
     routeSrcIds.forEach(id=>{if(map.getSource(id))map.removeSource(id);});routeSrcIds=[];
     if(map.getLayer(arrowLyr))map.removeLayer(arrowLyr);if(map.getSource("route-arrows"))map.removeSource("route-arrows");
+    if(map.getLayer(navRemainingLyr))map.removeLayer(navRemainingLyr);if(map.getSource(navRemainingSrc))map.removeSource(navRemainingSrc);
     if(map.getLayer("route-traveled"))map.removeLayer("route-traveled");if(map.getSource("route-traveled"))map.removeSource("route-traveled");
   }
 
@@ -247,6 +249,11 @@
       setStatus("📍 Location denied. Enter start location manually.");
       document.dispatchEvent(new CustomEvent("sp:locationDenied"));
     }
+    function onUnavailable(){
+      setStatus("📍 Location unavailable. Tap Try Again to get live location.");
+      document.dispatchEvent(new CustomEvent("sp:locationUnavailable"));
+      showLocationButton();
+    }
 
     // Probe permission state when supported (helps on mobile browsers that
     // start as "prompt" and never show a native prompt automatically).
@@ -271,9 +278,8 @@
           onSuccess,
           err2 => {
             if(err2.code === 1){ onDenied(); return; }
-            // Still failed — show manual button, don't block user
-            setStatus("📍 Location unavailable. Tap button or type manually.");
-            showLocationButton();
+            // Still failed — request explicit user tap retry flow
+            onUnavailable();
           },
           { enableHighAccuracy:false, timeout:20000, maximumAge:120000 }
         );
@@ -289,8 +295,8 @@
       err => {
         if(err.code === 1){ onDenied(); return; }
         if(!gotFix){
-          // Timeout on first watch attempt — show manual button
-          showLocationButton();
+          // Timeout/unavailable on watch startup
+          onUnavailable();
         }
       },
       { enableHighAccuracy:true, timeout:30000, maximumAge:30000 }
@@ -300,8 +306,7 @@
        show the manual locate button so user isn't stuck ── */
     setTimeout(()=>{
       if(!gotFix && !state.start){
-        setStatus("📍 GPS slow — tap button to retry or type manually.");
-        showLocationButton();
+        onUnavailable();
       }
     }, 10000);
   }
@@ -479,7 +484,7 @@
       if(!r.geometry?.coordinates)return;
       const sid="route-"+idx,lid="route-layer-"+idx;
       map.addSource(sid,{type:"geojson",data:{type:"Feature",properties:{},geometry:r.geometry}});
-      map.addLayer({id:lid,type:"line",source:sid,layout:{"line-join":"round","line-cap":"round"},paint:{"line-color":color,"line-width":isSel?7:3,"line-opacity":isSel?0.95:0.45}});
+      map.addLayer({id:lid,type:"line",source:sid,layout:{"line-join":"round","line-cap":"round"},paint:{"line-color":color,"line-width":isSel?7:3,"line-opacity":isSel?(state.navigating?0.18:0.95):0.45}});
       routeSrcIds.push(sid);routeLyrIds.push(lid);
     });
     const sel=labeled.find(x=>x.key===state.selectedRouteKey)||labeled[0];
@@ -498,6 +503,16 @@
     const geom={type:"LineString",coordinates:traveledCoords};
     if(map.getSource("route-traveled")){map.getSource("route-traveled").setData({type:"Feature",properties:{},geometry:geom});}
     else{map.addSource("route-traveled",{type:"geojson",data:{type:"Feature",properties:{},geometry:geom}});map.addLayer({id:"route-traveled",type:"line",source:"route-traveled",layout:{"line-join":"round","line-cap":"round"},paint:{"line-color":"rgba(255,255,255,0.25)","line-width":7}});}
+  }
+
+  function updateRemainingOverlay(traveledIdx){
+    const nav=state.nav;if(!nav.active||!nav.coordsLatLng.length)return;
+    const rem=nav.coordsLatLng.slice(traveledIdx).map(c=>[c[1],c[0]]);
+    if(rem.length<2)return;
+    const geom={type:"LineString",coordinates:rem};
+    if(map.getSource(navRemainingSrc)){map.getSource(navRemainingSrc).setData({type:"Feature",properties:{},geometry:geom});return;}
+    map.addSource(navRemainingSrc,{type:"geojson",data:{type:"Feature",properties:{},geometry:geom}});
+    map.addLayer({id:navRemainingLyr,type:"line",source:navRemainingSrc,layout:{"line-join":"round","line-cap":"round"},paint:{"line-color":routeColor(nav.active.key||state.selectedRouteKey),"line-width":7,"line-opacity":0.95}});
   }
 
   function renderIncidents(routeObj){
@@ -575,24 +590,26 @@
     const coords=(picked.route.geometry?.coordinates||[]);
     const coordsLatLng=coords.map(c=>[c[1],c[0]]);
     state.nav.active=picked;state.nav.coordsLatLng=coordsLatLng;state.nav.cumDistM=buildCumDist(coordsLatLng);
-    state.nav.startedAtMs=Date.now();state.nav.lastRerouteAtMs=0;state.nav.traveledIdx=0;state.nav.arrivedFired=false;
+    state.nav.startedAtMs=Date.now();state.nav.lastRerouteAtMs=0;state.nav.traveledIdx=0;state.nav.arrivedFired=false;state.nav.lastFollowMs=0;
     state.navigating=true;
     if(ui.navBanner)ui.navBanner.classList.add("active");
     if(ui.progressBar){ui.progressBar.style.display="block";ui.progressBar.style.width="0%";}
     $("btn-start-nav").textContent="Stop Navigation";
     if(coordsLatLng.length>0)map.easeTo({center:[coordsLatLng[0][1],coordsLatLng[0][0]],zoom:16,duration:800});
+    updateRemainingOverlay(0);
     ui.bnDest.textContent=state.end?(state.end.label||"Destination"):"—";
     setStatus("🧭 Navigation started — "+picked.key);
   }
 
   function stopNavigation(){
     state.navigating=false;state.nav.active=null;state.nav.coordsLatLng=[];state.nav.cumDistM=[];
-    state.nav.startedAtMs=null;state.nav.lastRerouteAtMs=0;state.nav.traveledIdx=0;state.nav.arrivedFired=false;
+    state.nav.startedAtMs=null;state.nav.lastRerouteAtMs=0;state.nav.traveledIdx=0;state.nav.arrivedFired=false;state.nav.lastFollowMs=0;
     lastNavPos=lastNavTime=null;
     if(ui.navBanner)ui.navBanner.classList.remove("active");
     if(ui.progressBar){ui.progressBar.style.display="none";ui.progressBar.style.width="0%";}
     $("btn-start-nav").textContent="Start Navigation";
     if(navDot){navDot.remove();navDot=null;}
+    if(map.getLayer(navRemainingLyr))map.removeLayer(navRemainingLyr);if(map.getSource(navRemainingSrc))map.removeSource(navRemainingSrc);
     if(map.getLayer("route-traveled"))map.removeLayer("route-traveled");if(map.getSource("route-traveled"))map.removeSource("route-traveled");
     if(ui.bnNext)ui.bnNext.textContent="—";if(ui.bnSpeed)ui.bnSpeed.textContent="—";
     setStatus("Navigation stopped.");
@@ -620,7 +637,14 @@
     const pct=total>0?Math.min(99,Math.round((traveled/total)*100)):0;
     if(ui.progressBar)ui.progressBar.style.width=pct+"%";
     updateTraveledOverlay(nav.traveledIdx);
-    map.easeTo({center:[lng,lat],zoom:16,duration:800,essential:true});
+    updateRemainingOverlay(nav.traveledIdx);
+    // Avoid continuous refresh by limiting camera follow updates.
+    const nowMs=Date.now();
+    if(nowMs-(nav.lastFollowMs||0)>1100){
+      const c=map.getCenter();
+      if(haversineM(c.lat,c.lng,lat,lng)>20){ map.jumpTo({center:[lng,lat]}); }
+      nav.lastFollowMs=nowMs;
+    }
     const step=getStepForPosition(active.route,traveled);
     if(ui.navArrow)ui.navArrow.textContent=step.arrow;
     if(ui.navInstruction)ui.navInstruction.textContent=step.instruction;
