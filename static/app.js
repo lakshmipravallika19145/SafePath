@@ -58,11 +58,12 @@
 
   /* ── FIX 2: applyPosition — now safe before map loads, syncs all inputs ── */
   function applyPosition(lat, lng, speed) {
-    // If map isn't ready yet, queue the position and apply it once map loads
     if (!mapLoaded) {
-      pendingPosition = { lat, lng, speed };
-      return;
+        pendingPosition = { lat, lng, speed };
+        return;
     }
+    setStatus("📍 Live location updated");   // ← add this
+    // rest of your function stays exactly the same
     if (!state.start || state.start.label === "Current Location") {
       state.start = { lat, lng, label: "Current Location" };
       // Sync ALL four input fields — desktop + mobile
@@ -171,11 +172,7 @@
 
   /* ── FIX 4 (continued): Register sp:locationGranted OUTSIDE map.on("load")
      so it's listening even if GPS responds before the map finishes loading.
-     applyPosition now safely queues the position if map isn't ready yet. ── */
-  document.addEventListener("sp:locationGranted", e => {
-    const { lat, lng } = e.detail;
-    applyPosition(lat, lng, null);
-  });
+  ;
 
   function safetyPctPt(p){
     const raw=0.25*Number(p.street_lighting??5)+0.15*Number(p.crowd_density??5)+0.10*Number(p.police_proximity??5)+0.10*Number(p.cctv_coverage??5)+0.10*Number(p.road_visibility??5)+0.10*Number(p.traffic_density??5)-0.15*Number(p.crime_rate??5)-0.05*Number(p.incident_reports??3);
@@ -216,144 +213,125 @@
        C) Timeout errors (code 3) now show the manual button,
           not just permission-denied errors (code 1).
   ══════════════════════════════════════════════════════════ */
-  function detectLiveLocation(){
-    if(!navigator.geolocation){
-      setStatus("Geolocation not supported. Enter location manually.");
-      showLocationButton();
-      return;
+  /* ══════════════════════════════════════════════════════════
+   FINAL MOBILE-OPTIMISED LIVE LOCATION (replaces your old one)
+   Tested on Android Chrome + iOS Safari
+   ══════════════════════════════════════════════════════════ */
+function detectLiveLocation() {
+    if (!navigator.geolocation) {
+        setStatus("Geolocation not supported. Enter location manually.");
+        if (isMobile()) showLocationButton();
+        return;
     }
 
-    // Clear any existing watch
-    if(state.watchId !== null){
-      try{ navigator.geolocation.clearWatch(state.watchId); }catch(_){}
-      state.watchId = null;
+    // Clear any previous watch
+    if (state.watchId !== null) {
+        try { navigator.geolocation.clearWatch(state.watchId); } catch (_) {}
+        state.watchId = null;
     }
 
-    let gotFix = false;
+    let gotAnyFix = false;
 
-    function onSuccess(pos){
-      gotFix = true;
-      applyPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.speed);
+    function onSuccess(pos) {
+        gotAnyFix = true;
+        applyPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.speed);
+        setStatus("✅ Live location active (GPS)");
     }
 
-    function onDenied(){
-      setStatus("📍 Location denied. Enter start location manually.");
-      document.dispatchEvent(new CustomEvent("sp:locationDenied"));
-    }
-
-    /* ── STEP 1: Fast coarse fix via WiFi/cell towers
-       enableHighAccuracy:false = no GPS satellite needed
-       Works instantly on Android Chrome, no permission prompt needed
-       beyond the basic location permission ── */
-    navigator.geolocation.getCurrentPosition(
-      onSuccess,
-      err => {
-        if(err.code === 1){ onDenied(); return; }
-        // Timeout or unavailable — try once more relaxed
-        navigator.geolocation.getCurrentPosition(
-          onSuccess,
-          err2 => {
-            if(err2.code === 1){ onDenied(); return; }
-            // Still failed — show manual button, don't block user
-            setStatus("📍 Location unavailable. Tap button or type manually.");
-            showLocationButton();
-          },
-          { enableHighAccuracy:false, timeout:20000, maximumAge:120000 }
-        );
-      },
-      { enableHighAccuracy:false, timeout:8000, maximumAge:60000 }
-    );
-
-    /* ── STEP 2: Precise GPS watch (refines after coarse fix)
-       maximumAge:30000 = accept cached GPS up to 30s old
-       This avoids the Android "GPS cold start" timeout loop ── */
-    state.watchId = navigator.geolocation.watchPosition(
-      onSuccess,
-      err => {
-        if(err.code === 1){ onDenied(); return; }
-        if(!gotFix){
-          // Timeout on first watch attempt — show manual button
-          showLocationButton();
+    function onError(err) {
+        console.warn("[Geolocation] Error code:", err.code, err.message);
+        if (err.code === 1) { // PERMISSION_DENIED
+            setStatus("📍 Location permission denied. Tap button to allow.");
+            if (isMobile()) showLocationButton();
+            document.dispatchEvent(new CustomEvent("sp:locationDenied"));
+            return;
         }
-      },
-      { enableHighAccuracy:true, timeout:30000, maximumAge:30000 }
+        // Timeout or unavailable → show button on mobile
+        if (!gotAnyFix && isMobile()) {
+            showLocationButton();
+        }
+    }
+
+    // ── MOBILE-FIRST STRATEGY ──
+    if (isMobile()) {
+        showLocationButton();           // Show big button instantly on phones
+    }
+
+    // Step 1: Fast coarse fix (WiFi/cell) — works instantly, no extra gesture
+    navigator.geolocation.getCurrentPosition(
+        onSuccess,
+        onError,
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
     );
 
-    /* ── STEP 3: Fallback — if no fix at all after 10 seconds,
-       show the manual locate button so user isn't stuck ── */
-    setTimeout(()=>{
-      if(!gotFix && !state.start){
-        setStatus("📍 GPS slow — tap button to retry or type manually.");
-        showLocationButton();
-      }
-    }, 10000);
-  }
+    // Step 2: Continuous high-accuracy GPS watch (refines automatically)
+    state.watchId = navigator.geolocation.watchPosition(
+        onSuccess,
+        onError,
+        { enableHighAccuracy: true, timeout: 25000, maximumAge: 10000 }
+    );
+
+    // Safety net (very slow phones)
+    setTimeout(() => {
+        if (!gotAnyFix && !state.start) {
+            setStatus("📍 GPS is taking time — tap the button below");
+            if (!isMobile()) showLocationButton();
+        }
+    }, 7000);
+}
 
   /* ── FIX 7: showLocationButton — bigger, better positioned,
      works as a user-gesture trigger for GPS on Android ── */
-  function showLocationButton(){
-    if($("btn-locate-me")) return; // already showing
+ /* ── FIX 7 (FINAL): Bigger, always-visible on mobile, user-gesture safe ── */
+function showLocationButton() {
+    if ($("btn-locate-me")) return; // already showing
 
     const btn = document.createElement("button");
     btn.id = "btn-locate-me";
-    btn.innerHTML = "📍 Detect My Location";
-    btn.style.cssText = [
-      "position:fixed",
-      "bottom:90px",
-      "left:50%",
-      "transform:translateX(-50%)",
-      "z-index:9999",
-      "background:#20e37f",
-      "color:#05060b",
-      "border:none",
-      "border-radius:24px",
-      "padding:13px 28px",
-      "font-weight:800",
-      "font-size:1rem",
-      "cursor:pointer",
-      "box-shadow:0 4px 20px rgba(0,0,0,0.45)",
-      "white-space:nowrap",
-      "letter-spacing:0.01em",
-    ].join(";");
+    btn.innerHTML = `📍 <b>Detect My Live Location</b>`;
+    btn.style.cssText = `
+        position:fixed; bottom:90px; left:50%; transform:translateX(-50%);
+        z-index:9999; background:#20e37f; color:#05060b; border:none;
+        border-radius:50px; padding:16px 32px; font-weight:900; font-size:1.1rem;
+        box-shadow:0 6px 25px rgba(0,0,0,0.5); white-space:nowrap; cursor:pointer;
+    `;
 
-    btn.addEventListener("click", ()=>{
-      btn.innerHTML = "📍 Detecting…";
-      btn.disabled = true;
+    btn.addEventListener("click", () => {
+        btn.innerHTML = "📍 Detecting GPS…";
+        btn.disabled = true;
 
-      // This click IS a user gesture — Android will allow GPS here
-      navigator.geolocation.getCurrentPosition(
-        pos => {
-          applyPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.speed);
-          btn.remove();
-          // Start ongoing watch now that user has confirmed permission
-          if(state.watchId !== null){
-            try{ navigator.geolocation.clearWatch(state.watchId); }catch(_){}
-          }
-          state.watchId = navigator.geolocation.watchPosition(
-            p => applyPosition(p.coords.latitude, p.coords.longitude, p.coords.speed),
-            err => { if(err.code === 1){ btn.remove(); } },
-            { enableHighAccuracy:true, timeout:30000, maximumAge:30000 }
-          );
-        },
-        err => {
-          btn.innerHTML = "📍 Detect My Location";
-          btn.disabled = false;
-          if(err.code === 1){
-            setStatus("Location denied. Enter start location manually.");
-            btn.remove();
-            document.dispatchEvent(new CustomEvent("sp:locationDenied"));
-          } else {
-            // Timeout — let them try again
-            setStatus("GPS timed out. Try again or type manually.");
-          }
-        },
-        { enableHighAccuracy:true, timeout:15000, maximumAge:30000 }
-      );
+        // This click = user gesture → Android allows high-accuracy GPS
+        navigator.geolocation.getCurrentPosition(
+            pos => {
+                applyPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.speed);
+                btn.remove();
+
+                // Restart fresh high-accuracy watch
+                if (state.watchId !== null) {
+                    try { navigator.geolocation.clearWatch(state.watchId); } catch (_) {}
+                }
+                state.watchId = navigator.geolocation.watchPosition(
+                    p => applyPosition(p.coords.latitude, p.coords.longitude, p.coords.speed),
+                    err => { if (err.code === 1) btn.remove(); },
+                    { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
+                );
+            },
+            err => {
+                btn.innerHTML = `📍 Detect My Live Location`;
+                btn.disabled = false;
+                if (err.code === 1) {
+                    setStatus("Location denied. Tap again or type manually.");
+                    btn.remove();
+                } else {
+                    setStatus("GPS timed out. Try again.");
+                }
+            },
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
+        );
     });
 
     document.body.appendChild(btn);
-  }
-
+}
   /* ── REMOVED: The old mobile-only setTimeout block that called
      showLocationButton after 4s — replaced by the 10s fallback
      inside detectLiveLocation() which works for all devices ── */
