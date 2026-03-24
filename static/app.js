@@ -29,7 +29,7 @@
     start:null,end:null,lastClick:null,heatEnabled:true,
     routes:[],aiBest:null,selectedRouteKey:"Safest Route",
     navigating:false,watchId:null,
-    nav:{active:null,coordsLatLng:[],cumDistM:[],startedAtMs:null,lastRerouteAtMs:0,traveledIdx:0,arrivedFired:false,lastFollowMs:0},
+    nav:{active:null,coordsLatLng:[],cumDistM:[],startedAtMs:null,lastRerouteAtMs:0,traveledIdx:0,arrivedFired:false,lastFollowMs:0,followMode:true,offRouteCount:0},
   };
 
   const isMobile=()=>window.innerWidth<=760;
@@ -111,6 +111,40 @@
     return wrap;
   }
 
+  function ensureRecenterButton(){
+    let btn=$("btn-recenter-nav");
+    if(btn) return btn;
+    btn=document.createElement("button");
+    btn.id="btn-recenter-nav";
+    btn.innerHTML="🎯 Center";
+    btn.style.cssText=[
+      "position:fixed",
+      "right:14px",
+      "bottom:150px",
+      "z-index:9999",
+      "background:#1a1f2e",
+      "color:#e8efff",
+      "border:1px solid rgba(32,227,127,0.5)",
+      "border-radius:22px",
+      "padding:10px 14px",
+      "font-size:0.9rem",
+      "font-weight:700",
+      "box-shadow:0 4px 14px rgba(0,0,0,0.4)",
+      "display:none",
+      "cursor:pointer"
+    ].join(";");
+    btn.addEventListener("click",()=>{
+      state.nav.followMode=true;
+      if(navDot){
+        const ll=navDot.getLngLat();
+        map.easeTo({center:[ll.lng,ll.lat],duration:400});
+      }
+      btn.style.display="none";
+    });
+    document.body.appendChild(btn);
+    return btn;
+  }
+
   function clearRoutes(){
     routeLyrIds.forEach(id=>{if(map.getLayer(id))map.removeLayer(id);});routeLyrIds=[];
     routeSrcIds.forEach(id=>{if(map.getSource(id))map.removeSource(id);});routeSrcIds=[];
@@ -169,6 +203,12 @@
         console.error(e);
       }
     })();
+  });
+
+  map.on("dragstart",()=>{
+    if(!state.navigating) return;
+    state.nav.followMode=false;
+    ensureRecenterButton().style.display="block";
   });
 
   /* ── FIX 4 (continued): Register sp:locationGranted OUTSIDE map.on("load")
@@ -590,25 +630,27 @@
     const coords=(picked.route.geometry?.coordinates||[]);
     const coordsLatLng=coords.map(c=>[c[1],c[0]]);
     state.nav.active=picked;state.nav.coordsLatLng=coordsLatLng;state.nav.cumDistM=buildCumDist(coordsLatLng);
-    state.nav.startedAtMs=Date.now();state.nav.lastRerouteAtMs=0;state.nav.traveledIdx=0;state.nav.arrivedFired=false;state.nav.lastFollowMs=0;
+    state.nav.startedAtMs=Date.now();state.nav.lastRerouteAtMs=0;state.nav.traveledIdx=0;state.nav.arrivedFired=false;state.nav.lastFollowMs=0;state.nav.followMode=true;state.nav.offRouteCount=0;
     state.navigating=true;
     if(ui.navBanner)ui.navBanner.classList.add("active");
     if(ui.progressBar){ui.progressBar.style.display="block";ui.progressBar.style.width="0%";}
     $("btn-start-nav").textContent="Stop Navigation";
     if(coordsLatLng.length>0)map.easeTo({center:[coordsLatLng[0][1],coordsLatLng[0][0]],zoom:16,duration:800});
     updateRemainingOverlay(0);
+    ensureRecenterButton().style.display="none";
     ui.bnDest.textContent=state.end?(state.end.label||"Destination"):"—";
     setStatus("🧭 Navigation started — "+picked.key);
   }
 
   function stopNavigation(){
     state.navigating=false;state.nav.active=null;state.nav.coordsLatLng=[];state.nav.cumDistM=[];
-    state.nav.startedAtMs=null;state.nav.lastRerouteAtMs=0;state.nav.traveledIdx=0;state.nav.arrivedFired=false;state.nav.lastFollowMs=0;
+    state.nav.startedAtMs=null;state.nav.lastRerouteAtMs=0;state.nav.traveledIdx=0;state.nav.arrivedFired=false;state.nav.lastFollowMs=0;state.nav.followMode=true;state.nav.offRouteCount=0;
     lastNavPos=lastNavTime=null;
     if(ui.navBanner)ui.navBanner.classList.remove("active");
     if(ui.progressBar){ui.progressBar.style.display="none";ui.progressBar.style.width="0%";}
     $("btn-start-nav").textContent="Start Navigation";
     if(navDot){navDot.remove();navDot=null;}
+    const rcBtn=$("btn-recenter-nav"); if(rcBtn) rcBtn.style.display="none";
     if(map.getLayer(navRemainingLyr))map.removeLayer(navRemainingLyr);if(map.getSource(navRemainingSrc))map.removeSource(navRemainingSrc);
     if(map.getLayer("route-traveled"))map.removeLayer("route-traveled");if(map.getSource("route-traveled"))map.removeSource("route-traveled");
     if(ui.bnNext)ui.bnNext.textContent="—";if(ui.bnSpeed)ui.bnSpeed.textContent="—";
@@ -638,12 +680,14 @@
     if(ui.progressBar)ui.progressBar.style.width=pct+"%";
     updateTraveledOverlay(nav.traveledIdx);
     updateRemainingOverlay(nav.traveledIdx);
-    // Avoid continuous refresh by limiting camera follow updates.
-    const nowMs=Date.now();
-    if(nowMs-(nav.lastFollowMs||0)>1100){
-      const c=map.getCenter();
-      if(haversineM(c.lat,c.lng,lat,lng)>20){ map.jumpTo({center:[lng,lat]}); }
-      nav.lastFollowMs=nowMs;
+    // Follow smoothly only in follow mode; if user drags map, pause follow.
+    if(nav.followMode){
+      const nowMs=Date.now();
+      if(nowMs-(nav.lastFollowMs||0)>1400){
+        const c=map.getCenter();
+        if(haversineM(c.lat,c.lng,lat,lng)>35){ map.easeTo({center:[lng,lat],duration:450,essential:true}); }
+        nav.lastFollowMs=nowMs;
+      }
     }
     const step=getStepForPosition(active.route,traveled);
     if(ui.navArrow)ui.navArrow.textContent=step.arrow;
@@ -666,7 +710,10 @@
     ui.bnNext.textContent=step.instruction;
     ui.bnReco.textContent=(active.route.ai_message||"").slice(0,80);
     ui.bnCurrent.textContent=lat.toFixed(4)+", "+lng.toFixed(4);
-    if(distToRoute>80)rerouteFrom(lat,lng);
+    // Reduce false reroutes from GPS drift by requiring consecutive off-route readings.
+    if(distToRoute>130) nav.offRouteCount=(nav.offRouteCount||0)+1;
+    else nav.offRouteCount=0;
+    if((nav.offRouteCount||0)>=3) rerouteFrom(lat,lng);
   }
 
   async function rerouteFrom(lat,lng){
