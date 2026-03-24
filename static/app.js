@@ -433,10 +433,34 @@
     return{results:data.map(item=>({display_name:item.display_name,name:(item.namedetails?.name||(item.display_name||"").split(",")[0].trim()),lat:parseFloat(item.lat),lng:parseFloat(item.lon),type:item.type,class:item.class}))};
   }
 
+  function placeIcon(item){
+    const cls=(item?.class||"").toLowerCase();
+    const typ=(item?.type||"").toLowerCase();
+    if(typ.includes("hospital")||typ.includes("clinic")||typ.includes("doctors")) return "🏥";
+    if(typ.includes("restaurant")||typ.includes("cafe")||typ.includes("fast_food")||typ.includes("food_court")) return "🍽️";
+    if(typ.includes("bar")||typ.includes("pub")) return "🍸";
+    if(typ.includes("school")||typ.includes("college")||typ.includes("university")) return "🎓";
+    if(typ.includes("bank")||typ.includes("atm")) return "🏦";
+    if(typ.includes("pharmacy")) return "💊";
+    if(typ.includes("hotel")||typ.includes("guest_house")||typ.includes("hostel")) return "🏨";
+    if(typ.includes("fuel")) return "⛽";
+    if(typ.includes("bus_station")||typ.includes("bus_stop")) return "🚌";
+    if(typ.includes("railway_station")||typ.includes("station")) return "🚉";
+    if(typ.includes("airport")) return "✈️";
+    if(typ.includes("parking")) return "🅿️";
+    if(typ.includes("police")) return "👮";
+    if(typ.includes("place_of_worship")||typ.includes("temple")||typ.includes("church")||typ.includes("mosque")) return "🛕";
+    if(typ.includes("park")||typ.includes("garden")) return "🌳";
+    if(cls==="highway") return "🛣️";
+    if(cls==="shop") return "🛍️";
+    if(cls==="tourism") return "📸";
+    return "📍";
+  }
+
   function renderSuggestions(container,payload,onPick){
     container.innerHTML="";const results=payload?.results||[];if(!results.length){container.classList.remove("suggest--open");return;}
     if(payload?.message){const m=document.createElement("div");m.className="suggest__msg";m.textContent=payload.message;container.appendChild(m);}
-    results.forEach(item=>{const row=document.createElement("button");row.type="button";row.className="suggest__item";row.innerHTML=`<div class="suggest__name">${item.name||(item.display_name||"").split(",")[0]}</div><div class="suggest__meta">${item.display_name||""}</div>`;row.addEventListener("click",()=>onPick(item));container.appendChild(row);});
+    results.forEach(item=>{const row=document.createElement("button");row.type="button";row.className="suggest__item";row.innerHTML=`<div class="suggest__name">${placeIcon(item)} ${item.name||(item.display_name||"").split(",")[0]}</div><div class="suggest__meta">${item.display_name||""}</div>`;row.addEventListener("click",()=>onPick(item));container.appendChild(row);});
     container.classList.add("suggest--open");
   }
 
