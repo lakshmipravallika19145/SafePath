@@ -27,6 +27,7 @@ USER_REPORTS_PATH  = DATA_DIR / "user_reports.jsonl"
 MSG91_API_KEY   = os.getenv("MSG91_API_KEY",   "501984ANen7Xhbtj69bd9eeeP1")
 MSG91_SENDER_ID = os.getenv("MSG91_SENDER_ID", "india")
 TOMTOM_API_KEY  = os.getenv("TOMTOM_API_KEY",  "OfDU2Qgiw5VbIld0HdbAaJ9xNnWYTE0w")
+ORS_API_KEY     = os.getenv("ORS_API_KEY", "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjkwNzk0NjY2ZjM5ZTRiOWZhMDI5YjgxNjhhOGY4NjViIiwiaCI6Im11cm11cjY0In0=")
 
 _ROUTES_CACHE:  dict = {}
 _TRAFFIC_CACHE: dict = {}
@@ -497,6 +498,46 @@ def _osrm_routes(s_lat,s_lng,e_lat,e_lng,timeout_s=12):
         except Exception as e: last_err=e
     raise RuntimeError(f"All OSRM mirrors failed: {last_err}")
 
+def _ors_routes(s_lat,s_lng,e_lat,e_lng,timeout_s=20):
+    if not ORS_API_KEY:
+        raise RuntimeError("ORS_API_KEY not configured")
+    url = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
+    body = {
+        "coordinates": [[s_lng, s_lat], [e_lng, e_lat]],
+        "alternative_routes": {"target_count": 3, "weight_factor": 1.6},
+        "instructions": True,
+    }
+    headers = {"Authorization": ORS_API_KEY, "Content-Type": "application/json"}
+    r = requests.post(url, json=body, headers=headers, timeout=timeout_s)
+    r.raise_for_status()
+    data = r.json()
+    feats = data.get("features") or []
+    out = []
+    for f in feats:
+        props = f.get("properties") or {}
+        summ = (props.get("summary") or {})
+        segs = props.get("segments") or []
+        legs = []
+        for seg in segs:
+            steps = []
+            for st in (seg.get("steps") or []):
+                steps.append({
+                    "distance": st.get("distance", 0),
+                    "instruction": st.get("instruction", ""),
+                    "name": st.get("name", ""),
+                    "maneuver": {"type": st.get("type", ""), "modifier": st.get("way_points", "")},
+                })
+            legs.append({"steps": steps})
+        out.append({
+            "distance": float(summ.get("distance") or 0),
+            "duration": float(summ.get("duration") or 0),
+            "geometry": f.get("geometry") or {"type": "LineString", "coordinates": []},
+            "legs": legs,
+        })
+    if not out:
+        raise RuntimeError("ORS returned no routes")
+    return out
+
 def _cache_key_for_route(s_lat,s_lng,e_lat,e_lng):
     return f"{round(s_lat,5)}:{round(s_lng,5)}->{round(e_lat,5)}:{round(e_lng,5)}"
 
@@ -832,13 +873,23 @@ def create_app():
         sp=_read_json(SAFETY_POINTS_PATH,default=[])
         cache_key=_cache_key_for_route(s_lat,s_lng,e_lat,e_lng)
         raw_osrm=_cache_get(cache_key); osrm_ok=False
+        route_source = "fallback"
         if raw_osrm is None:
             try:
                 data=_osrm_routes(s_lat,s_lng,e_lat,e_lng)
                 if data.get("code")=="Ok" and data.get("routes"):
-                    raw_osrm=data["routes"]; _cache_set(cache_key,raw_osrm); osrm_ok=True
-            except Exception: raw_osrm=None
-        else: osrm_ok=True
+                    raw_osrm=data["routes"]; _cache_set(cache_key,raw_osrm); osrm_ok=True; route_source = "osrm"
+            except Exception:
+                raw_osrm=None
+        else:
+            osrm_ok=True
+            route_source = "osrm"
+        if raw_osrm is None and ORS_API_KEY:
+            try:
+                raw_osrm = _ors_routes(s_lat, s_lng, e_lat, e_lng)
+                route_source = "openrouteservice"
+            except Exception:
+                raw_osrm = None
         if not raw_osrm: raw_osrm=_fallback_routes(s_lat,s_lng,e_lat,e_lng)
         if osrm_ok and len(raw_osrm)<3:
             ml,mg=(s_lat+e_lat)/2,(s_lng+e_lng)/2; dl,dg=e_lat-s_lat,e_lng-s_lng
@@ -915,7 +966,7 @@ def create_app():
                            f"within 500m of your destination. Please stay alert.")
         return jsonify({"routes":final_routes,
             "ai_recommendation":f"SafePath recommends the {top['route_label']} ({top['route_score']}% safe, ~{round(top['duration_s']/60)} min by car).",
-            "source":"osrm" if osrm_ok else "fallback","count":len(final_routes),
+            "source":route_source if raw_osrm else ("osrm" if osrm_ok else "fallback"),"count":len(final_routes),
             "destination_reports": destination_reports,
             "destination_warning": warning_msg,
             "top_destination_complaints": top_complaints})
