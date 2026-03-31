@@ -890,8 +890,10 @@ def create_app():
                 route_source = "openrouteservice"
             except Exception:
                 raw_osrm = None
-        if not raw_osrm: raw_osrm=_fallback_routes(s_lat,s_lng,e_lat,e_lng)
-        if osrm_ok and len(raw_osrm)<3:
+        if not raw_osrm:
+            raw_osrm=_fallback_routes(s_lat,s_lng,e_lat,e_lng)
+            route_source = "fallback"
+        if route_source != "fallback" and len(raw_osrm)<3:
             ml,mg=(s_lat+e_lat)/2,(s_lng+e_lng)/2; dl,dg=e_lat-s_lat,e_lng-s_lng
             rlen=math.hypot(dl,dg) or 1.0; pl,pg=-dg/rlen,dl/rlen
             for off in [0.004,-0.004,0.007,-0.007]:
@@ -906,15 +908,12 @@ def create_app():
                             if all(abs(float(vr.get("distance",0))-float(r.get("distance",0)))>100 for r in raw_osrm):
                                 raw_osrm.append(vr)
                     except: pass
-        so=[(0.004,-0.004),(-0.004,0.004),(0.006,0.006)]; si=0
-        while len(raw_osrm)<3:
-            dlo,dgo=so[si%len(so)]; ml2,mg2=(s_lat+e_lat)/2+dlo,(s_lng+e_lng)/2+dgo
-            cs=_interpolate_route(s_lat,s_lng,ml2,mg2,n=45)[:-1]+_interpolate_route(ml2,mg2,e_lat,e_lng,n=45)
-            dist=sum(_haversine_m(cs[i][1],cs[i][0],cs[i+1][1],cs[i+1][0]) for i in range(len(cs)-1))
-            bd=float(raw_osrm[0].get("distance") or 1); bu=float(raw_osrm[0].get("duration") or 0)
-            raw_osrm.append({"distance":dist,"duration":bu*(dist/bd) if bd>0 else dist/6.94,
-                              "geometry":{"type":"LineString","coordinates":cs},"legs":[]}); si+=1
-        raw_osrm=raw_osrm[:3]
+        # Never pad with synthetic straight lines when at least one real road route exists.
+        # Users prefer fewer real routes over fake "fastest" lines.
+        if route_source == "fallback":
+            raw_osrm = raw_osrm[:3]
+        elif raw_osrm:
+            raw_osrm = raw_osrm[:max(1, min(3, len(raw_osrm)))]
         scored=[]
         for r in raw_osrm:
             dist_m=float(r.get("distance") or 0)
@@ -938,13 +937,16 @@ def create_app():
                 "legs":r.get("legs") or [],"nearby_count":len(nearby),
                 "worst_points":sorted(nearby,key=lambda p:p.get("safety_percent",100))[:8],
                 "ai_message":ai_msg,"traffic_factor":round(tf,2),"crowd_factor":round(cf,2),"road_types":rb})
+        if not scored:
+            return jsonify({"error":"No navigable routes found"}), 502
+        n=len(scored)
         scores=[s["route_score"] for s in scored]; durs=[s["duration_s"] for s in scored]
         s_rng=(max(scores)-min(scores)) or 1.0; d_rng=(max(durs)-min(durs)) or 1.0
         for s in scored:
             s["_bal"]=0.5*(s["route_score"]-min(scores))/s_rng+0.5*(max(durs)-s["duration_s"])/d_rng
-        si2=max(range(3),key=lambda i:scored[i]["route_score"])
-        fi=min(range(3),key=lambda i:scored[i]["duration_s"])
-        rem=[i for i in range(3) if i not in (si2,fi)]
+        si2=max(range(n),key=lambda i:scored[i]["route_score"])
+        fi=min(range(n),key=lambda i:scored[i]["duration_s"])
+        rem=[i for i in range(n) if i not in (si2,fi)]
         bi=max(rem,key=lambda i:scored[i]["_bal"]) if rem else fi
         lmap={si2:"Safest Route",bi:"Balanced Route",fi:"Fastest Route"}
         final_routes,seen=[],set()
@@ -952,7 +954,7 @@ def create_app():
             if idx in seen: continue
             seen.add(idx); r=dict(scored[idx]); r["route_label"]=lmap[idx]; r.pop("_bal",None)
             final_routes.append(r)
-        for idx in range(3):
+        for idx in range(n):
             if len(final_routes)==3: break
             if idx not in seen:
                 r=dict(scored[idx]); r["route_label"]="Route"; r.pop("_bal",None); final_routes.append(r)
