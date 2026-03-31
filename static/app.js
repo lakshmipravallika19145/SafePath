@@ -452,7 +452,7 @@
 
   let startAbort=null,endAbort=null,reportAbort=null;
   async function fetchSuggestions(q,ctrl){
-    const params=new URLSearchParams({format:"json",q,limit:"8",addressdetails:"1",namedetails:"1",countrycodes:"in","accept-language":"en"});
+    const params=new URLSearchParams({format:"json",q,limit:"8",addressdetails:"1",namedetails:"1","accept-language":"en"});
     if(state.start?.lat){params.set("viewbox",`${state.start.lng-0.5},${state.start.lat+0.5},${state.start.lng+0.5},${state.start.lat-0.5}`);}
     const res=await fetch("https://nominatim.openstreetmap.org/search?"+params,{signal:ctrl.signal,headers:{"Accept-Language":"en"}});
     const data=await res.json();
@@ -537,7 +537,7 @@
 
   async function geocodeAddress(q){
     try{
-      const params=new URLSearchParams({format:"json",q,limit:"1",addressdetails:"1",countrycodes:"in","accept-language":"en"});
+      const params=new URLSearchParams({format:"json",q,limit:"1",addressdetails:"1","accept-language":"en"});
       const res=await fetch("https://nominatim.openstreetmap.org/search?"+params,{headers:{"Accept-Language":"en"}});
       const data=await res.json();
       if(!data?.length)return null;
